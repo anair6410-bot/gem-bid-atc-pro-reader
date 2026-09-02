@@ -6,22 +6,82 @@ try:
 except:
     from PyPDF2 import PdfReader
 
-st.set_page_config(page_title="GeM ATC + Bid Tracker", layout="wide", page_icon="🇮🇳")
+st.set_page_config(page_title="GeM ATC Pro", layout="wide", page_icon="🇮🇳")
 
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
-* { font-family: 'Inter', sans-serif; }
-.stApp { background: #F8FAFC; }
-.main-header { background: white; padding: 20px 25px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.06); border: 1px solid #E2E8F0; margin-bottom: 18px; display:flex; justify-content:space-between; align-items:center; }
-.logo-text { font-size: 23px; font-weight: 800; color: #0F172A; }
-.step-card { background: white; border-radius: 16px; padding: 22px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); border: 1px solid #E2E8F0; margin-bottom: 18px; }
-.upload-box { background: #F8FAFC; border: 2px dashed #CBD5E1; border-radius: 12px; padding: 15px; text-align:center; }
-.product-card { background: white; border-radius: 12px; padding: 14px; border: 1px solid #E2E8F0; border-left: 4px solid #10B981; }
-.market-tag { background: #ECFDF5; color: #065F46; font-size: 11px; padding: 3px 8px; border-radius: 20px; font-weight: 600; }
-.atc-chip { background: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; margin: 3px; display:inline-block; }
-.bid-chip { background: #FEF3C7; color: #92400E; border: 1px solid #FCD34D; padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; margin: 3px; display:inline-block; }
-div[data-testid="stMetric"] { background: white; border-radius: 14px; padding: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); border: 1px solid #E2E8F0; }
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&display=swap');
+* { font-family: 'Outfit', sans-serif; }
+
+.stApp {
+    background: radial-gradient(1200px at 10% -10%, #FFE9C6 0%, transparent 60%),
+                radial-gradient(1000px at 90% 0%, #C6F6D5 0%, transparent 50%),
+                linear-gradient(180deg, #F8FAFF 0%, #EEF2FF 100%);
+}
+
+.hero {
+    background: linear-gradient(135deg, #0F172A 0%, #1E293B 50%, #0F172A 100%);
+    border-radius: 20px;
+    padding: 22px 26px;
+    color: white;
+    display:flex; justify-content:space-between; align-items:center;
+    box-shadow: 0 20px 40px rgba(15,23,42,0.25);
+    border: 1px solid rgba(255,255,255,0.1);
+    position:relative; overflow:hidden;
+}
+.hero::before {
+    content:''; position:absolute; top:-50px; left:-50px; width:200px; height:200px;
+    background: radial-gradient(circle, #FF9933 0%, transparent 70%); opacity:0.25;
+}
+.hero::after {
+    content:''; position:absolute; bottom:-60px; right:100px; width:250px; height:250px;
+    background: radial-gradient(circle, #138808 0%, transparent 70%); opacity:0.25;
+}
+.hero-title { font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
+.hero-sub { font-size: 13px; opacity:0.7; margin-top:4px; }
+.tricolor { height:4px; border-radius:10px; background: linear-gradient(90deg, #FF9933 0%, #FFFFFF 50%, #138808 100%); margin: 14px 0; }
+
+.glass-card {
+    background: rgba(255,255,255,0.85);
+    backdrop-filter: blur(12px);
+    border-radius: 18px;
+    padding: 20px;
+    border: 1px solid rgba(255,255,255,0.8);
+    box-shadow: 0 8px 32px rgba(15,23,42,0.08), 0 0 0 1px rgba(15,23,42,0.04);
+    margin-bottom: 16px;
+}
+.upload-card {
+    background: white;
+    border-radius: 16px;
+    padding: 18px;
+    border: 1.5px dashed #CBD5E1;
+    text-align:center;
+    transition: all 0.2s;
+}
+.upload-card:hover { border-color: #6366F1; background: #F8FAFF; transform: translateY(-2px); box-shadow: 0 12px 24px rgba(99,102,241,0.12); }
+.upload-icon { font-size: 28px; margin-bottom: 6px; }
+
+.prod-card {
+    background: white;
+    border-radius: 14px;
+    padding: 14px 16px;
+    border: 1px solid #E2E8F0;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+    position:relative; overflow:hidden;
+}
+.prod-card::before { content:''; position:absolute; left:0; top:0; bottom:0; width:4px; background: linear-gradient(180deg, #10B981, #059669); }
+.prod-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+.prod-name { font-weight:700; font-size:13px; color:#0F172A; }
+.price-pill { background:#0F172A; color:white; font-size:11px; padding:4px 10px; border-radius:20px; font-weight:600; }
+.market-pill { background:#ECFDF5; color:#065F46; font-size:10px; padding:2px 8px; border-radius:20px; border:1px solid #A7F3D0; }
+
+.status-dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:6px; }
+.dot-green { background:#10B981; box-shadow:0 0 0 4px #D1FAE5; }
+.dot-red { background:#EF4444; box-shadow:0 0 0 4px #FEE2E2; }
+.dot-yellow { background:#F59E0B; box-shadow:0 0 0 4px #FEF3C7; }
+
+div[data-testid="stMetric"] { background:white; border-radius:16px; border:1px solid #E2E8F0; box-shadow:0 4px 16px rgba(0,0,0,0.06); }
+.stButton>button { border-radius:12px!important; font-weight:600!important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -32,7 +92,6 @@ MARKET = {
     "CHASSIS SWITCH": 300, "SERIAL COM PORT+PARALLEL": 250, "Graphics CARD": 0, "OS": 0,
     "MS OFFICE": 0, "TPM 2.0": 0, "CAMERA": 0, "DP PORT": 0
 }
-
 KEYWORDS = {
     "Processor CPU": ["processor", "cpu", "i3", "i5", "i7", "ryzen"],
     "MB": ["motherboard"], "Graphics CARD": ["graphics", "gpu"], "OS": ["windows", "linux", "operating system"],
@@ -42,19 +101,16 @@ KEYWORDS = {
     "CHASSIS SWITCH": ["chassis intrusion"], "TPM 2.0": ["tpm"], "CAMERA": ["camera", "webcam"], "ANTIVIRUS": ["antivirus"],
     "DP PORT": ["display port"], "SERIAL COM PORT+PARALLEL": ["serial", "com port"], "Keyboard & Mouse": ["keyboard", "mouse"]
 }
-
-DEPTS = ["BANK OF INDIA","SBI","BANK OF BARODA","INDIAN ARMY","INDIAN AIR FORCE","MINISTRY OF DEFENCE","MINISTRY OF FINANCE","MINISTRY OF HOME AFFAIRS","MINISTRY OF EDUCATION","MINISTRY OF RAILWAYS","MINISTRY OF ELECTRONICS & IT","NITI AAYOG","ISRO","NIC"]
+DEPTS = ["BANK OF INDIA","SBI","BANK OF BARODA","INDIAN ARMY","MINISTRY OF DEFENCE","MINISTRY OF FINANCE","MINISTRY OF HOME AFFAIRS","MINISTRY OF EDUCATION","MINISTRY OF RAILWAYS","MINISTRY OF ELECTRONICS & IT","NITI AAYOG","ISRO","NIC"]
 ITEMS = ["Desktop Computer","All in One PC","All in One PC - High End","High End Desktop Computer","Entry Level Desktop Computer","Mid Level Desktop Computer","Entry and Mid Level Desktop Computer","Laptop - Notebook"]
 
 def read_pdf(f):
     r = PdfReader(f)
     return "\n".join([p.extract_text() or "" for p in r.pages])
-
 def detect(text):
     low=text.lower()
     return [prod for prod, kws in KEYWORDS.items() if any(k in low for k in kws)]
-
-def parse_bid_meta(text):
+def parse_meta(text):
     org=""; m=re.search(r'Organisation\s*Name\s*[:\-]?\s*(.+?)\n',text,re.I)
     if m: org=m.group(1).strip()[:100]
     bid=""; m=re.search(r'GEM\/\d{4}\/B\/\d{4,8}',text.replace(" ","").upper())
@@ -67,151 +123,121 @@ def parse_bid_meta(text):
     if m: dept=(m.group(1) or m.group(2) or "").strip()[:100]
     return org,item,bid,qty,dept
 
-# HEADER
+# HERO HEADER
 st.markdown("""
-<div class="main-header">
-<div><div class="logo-text">🇮🇳 GeM Dual Document Tracker</div><div style="color:#64748B; font-size:13px;">ATC + Bid Document Tracking • Only ATC Products Priced</div></div>
-<div style="color:#64748B; font-size:12px;">Market Price Sep 2026</div>
+<div class="hero">
+<div>
+<div class="hero-title">🇮🇳 GeM ATC Pro Studio</div>
+<div class="hero-sub">Dual Document Tracker • ATC + Bid • Real-time Market Pricing Sep 2026</div>
 </div>
+<div style="text-align:right;">
+<div style="font-size:11px; opacity:0.6;">APPEARANCE V3</div>
+<div style="font-size:13px; font-weight:600; margin-top:2px;">✨ Premium Glass UI</div>
+</div>
+</div>
+<div class="tricolor"></div>
 """, unsafe_allow_html=True)
 
-top1,top2,top3 = st.columns([3,1,1])
-with top3:
-    if st.button("🗑️ Clear All", use_container_width=True, type="primary"):
-        for k in list(st.session_state.keys()):
-            del st.session_state[k]
+# TOP ACTIONS
+a1,a2,a3,a4 = st.columns([4,1.2,1.2,0.8])
+with a2:
+    if st.button("💹 Market Price", use_container_width=True):
+        for k,v in MARKET.items(): st.session_state[f"pr_{k}"]=v
+        st.toast("Market price set")
         st.rerun()
-with top2:
-    if st.button("💹 Set Market Price", use_container_width=True):
-        for k,v in MARKET.items():
-            st.session_state[f"pr_{k}"]=v
+with a3:
+    if st.button("🎨 Change Theme", use_container_width=True):
+        st.session_state["theme"] = "dark" if st.session_state.get("theme")!="dark" else "light"
+        st.rerun()
+with a4:
+    if st.button("🗑️", use_container_width=True, help="Clear All"):
+        for k in list(st.session_state.keys()): del st.session_state[k]
         st.rerun()
 
-# DUAL UPLOAD SECTION
-st.markdown('<div class="step-card">', unsafe_allow_html=True)
-st.markdown("### 📂 Step 1 • Upload Documents — ATC + Bid (Dual Tracker)")
-
-u1,u2 = st.columns(2)
-with u1:
-    st.markdown('<div class="upload-box">', unsafe_allow_html=True)
-    st.markdown("**📄 Upload ATC Document**")
-    st.caption("Product specs, processor, RAM, SSD etc.")
-    atc_file = st.file_uploader("ATC PDF", type=["pdf"], key="atc_up", label_visibility="collapsed")
-    if atc_file:
-        st.success(f"✅ ATC Loaded: {atc_file.name}")
+# DUAL UPLOAD - NEW APPEARANCE
+st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+st.markdown("#### 📂 Upload Center — Two Documents")
+c1,c2 = st.columns(2, gap="medium")
+with c1:
+    st.markdown('<div class="upload-card">', unsafe_allow_html=True)
+    st.markdown('<div class="upload-icon">📄</div><b>ATC Document</b><div style="font-size:12px; color:#64748B; margin:6px 0;">Product specs, processor, RAM, SSD, etc.</div>', unsafe_allow_html=True)
+    atc_file = st.file_uploader("ATC", type=["pdf"], key="atc", label_visibility="collapsed")
+    if atc_file: st.markdown(f'<div style="margin-top:8px;"><span class="status-dot dot-green"></span><span style="font-size:12px; font-weight:600; color:#065F46;">{atc_file.name[:30]} loaded</span></div>', unsafe_allow_html=True)
+    else: st.markdown(f'<div style="margin-top:8px;"><span class="status-dot dot-red"></span><span style="font-size:12px; color:#64748B;">Waiting for ATC PDF</span></div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-with u2:
-    st.markdown('<div class="upload-box">', unsafe_allow_html=True)
-    st.markdown("**📑 Upload Bid Document**")
-    st.caption("Organisation, Bid No, Qty, Item Category")
-    bid_file = st.file_uploader("Bid PDF", type=["pdf"], key="bid_up", label_visibility="collapsed")
-    if bid_file:
-        st.success(f"✅ Bid Loaded: {bid_file.name}")
+with c2:
+    st.markdown('<div class="upload-card">', unsafe_allow_html=True)
+    st.markdown('<div class="upload-icon">📑</div><b>Bid Document</b><div style="font-size:12px; color:#64748B; margin:6px 0;">Organisation, Bid No, Qty, Item Category</div>', unsafe_allow_html=True)
+    bid_file = st.file_uploader("Bid", type=["pdf"], key="bid", label_visibility="collapsed")
+    if bid_file: st.markdown(f'<div style="margin-top:8px;"><span class="status-dot dot-green"></span><span style="font-size:12px; font-weight:600; color:#065F46;">{bid_file.name[:30]} loaded</span></div>', unsafe_allow_html=True)
+    else: st.markdown(f'<div style="margin-top:8px;"><span class="status-dot dot-yellow"></span><span style="font-size:12px; color:#64748B;">Waiting for Bid PDF</span></div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-# PROCESS DOCUMENTS
-atc_text=""; bid_text=""; detected=[]; org_v=""; item_v=""; bid_v=""; qty_v=65; dept_v=""; bid_meta_found=False; atc_meta_found=False
-
+# PROCESS
+atc_text=""; bid_text=""; detected=[]; org_v=""; item_v=""; bid_v=""; qty_v=65; dept_v=""
 if atc_file:
     atc_text = read_pdf(atc_file)
     detected = detect(atc_text)
-    org_v1,item_v1,bid_v1,qty_v1,dept_v1 = parse_bid_meta(atc_text)
-    if detected: atc_meta_found=True
-
+    org_v,item_v,bid_v,qty_v,dept_v = parse_meta(atc_text)
 if bid_file:
     bid_text = read_pdf(bid_file)
-    org_v2,item_v2,bid_v2,qty_v2,dept_v2 = parse_bid_meta(bid_text)
-    bid_meta_found=True
-    # Merge: Bid doc has priority for Organisation/Bid details
-    org_v = org_v2 or org_v1 if atc_file else org_v2
-    item_v = item_v2 or item_v1 if atc_file else item_v2
-    bid_v = bid_v2 or bid_v1 if atc_file else bid_v2
-    qty_v = qty_v2 or qty_v1 if atc_file else qty_v2
-    dept_v = dept_v2 or dept_v1 if atc_file else dept_v2
-    # Also detect products from bid if ATC not uploaded
-    if not detected:
-        detected = detect(bid_text)
-else:
-    if atc_file:
-        org_v,item_v,bid_v,qty_v,dept_v = parse_bid_meta(atc_text)
+    org2,item2,bid2,qty2,dept2 = parse_meta(bid_text)
+    org_v = org2 or org_v; item_v = item2 or item_v; bid_v = bid2 or bid_v; qty_v = qty2 or qty_v; dept_v = dept2 or dept_v
+    if not detected: detected = detect(bid_text)
 
-# TRACKING STATUS
-st.markdown('<div class="step-card">', unsafe_allow_html=True)
-st.markdown("### 🔍 Document Tracking Status")
-
-t1,t2,t3 = st.columns(3)
-with t1:
-    st.markdown("**ATC Document**")
-    if atc_file:
-        st.markdown(f'<span class="atc-chip">✅ {len(detected)} Products Found</span>', unsafe_allow_html=True)
-        st.markdown(f'<span class="atc-chip">📄 {atc_file.name[:25]}</span>', unsafe_allow_html=True)
-    else:
-        st.markdown('<span class="atc-chip">❌ Not Uploaded</span>', unsafe_allow_html=True)
-
-with t2:
-    st.markdown("**Bid Document**")
-    if bid_file:
-        st.markdown(f'<span class="bid-chip">✅ Organisation Found</span>' if org_v else '<span class="bid-chip">⚠️ Organisation Not Found</span>', unsafe_allow_html=True)
-        st.markdown(f'<span class="bid-chip">✅ Bid: {bid_v[:20] if bid_v else "Not Found"}</span>', unsafe_allow_html=True)
-    else:
-        st.markdown('<span class="bid-chip">❌ Not Uploaded</span>', unsafe_allow_html=True)
-
-with t3:
-    st.markdown("**Combined**")
-    if atc_file and bid_file:
-        st.success("Both docs tracked — Full auto-fill")
-    elif atc_file or bid_file:
-        st.warning("One doc uploaded — Partial tracking")
-    else:
-        st.info("Upload both for full tracking")
-
+# TRACKING DASHBOARD - NEW LOOK
+st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+st.markdown("##### 🔍 Live Document Tracking")
+k1,k2,k3,k4 = st.columns(4)
+with k1:
+    st.metric("ATC Products", f"{len(detected)} Found" if detected else "0", "✅ Tracked" if atc_file else "❌ Missing")
+with k2:
+    st.metric("Organisation", org_v[:18] if org_v else "Not Found", "📑 From Bid" if bid_file else "Waiting")
+with k3:
+    st.metric("Bid Number", bid_v[:18] if bid_v else "Not Found", "Tracked" if bid_v else "Pending")
+with k4:
+    st.metric("Quantity", f"{qty_v} Units", f"{dept_v[:12] if dept_v else 'Dept'}")
 if detected:
-    st.markdown("**ATC Products Tracked:**")
-    st.markdown("".join([f'<span class="atc-chip">✅ {p}</span>' for p in detected]), unsafe_allow_html=True)
+    st.markdown(" ".join([f'<span style="background:#0F172A; color:white; padding:4px 10px; border-radius:20px; font-size:11px; margin:2px; display:inline-block;">{p}</span>' for p in detected]), unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
-# STEP 2 - DETAILS
-st.markdown('<div class="step-card">', unsafe_allow_html=True)
-st.markdown("### Step 2 • Bid Details (Auto-filled from Bid Document)")
-
+# DETAILS - GLASS
+st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+st.markdown("##### ⚙️ Bid Configuration")
 c1,c2,c3,c4 = st.columns(4)
 with c1:
-    try: d_idx = next((i for i,o in enumerate(DEPTS) if dept_v and dept_v.lower() in o.lower() or o.lower() in dept_v.lower()),0)
+    try: d_idx = next((i for i,o in enumerate(DEPTS) if dept_v and (dept_v.lower() in o.lower() or o.lower() in dept_v.lower())),0)
     except: d_idx=0
     dept = st.selectbox("Department", DEPTS, index=d_idx, key="dept")
-    st.caption(f"Tracked from Bid: {dept_v}" if dept_v else "From Bid doc")
 with c2: org = st.text_input("Organisation", value=org_v, key="org")
-with c3: bid_no = st.text_input("Bid Number", value=bid_v, key="bidno")
-with c4: qty = st.number_input("Quantity", 1, 5000, qty_v, key="qty")
+with c3: bid_no = st.text_input("Bid No", value=bid_v, key="bidno")
+with c4: qty = st.number_input("Quantity", 1, 5000, qty_v, key="qty_final")
 
-col_a,col_b = st.columns([3,1])
-with col_a:
-    try: i_idx = next((i for i,o in enumerate(ITEMS) if item_v and o.lower() in item_v.lower() or item_v.lower() in o.lower()),0)
+c_a,c_b = st.columns([3,1])
+with c_a:
+    try: i_idx = next((i for i,o in enumerate(ITEMS) if item_v and (o.lower() in item_v.lower() or item_v.lower() in o.lower())),0)
     except: i_idx=0
-    item_cat = st.selectbox("Item Category", ITEMS, index=i_idx, key="itemcat")
-    st.caption(f"Tracked from Bid: {item_v[:50]}" if item_v else "")
-with col_b:
-    margin = st.number_input("Margin per PC ₹", value=st.session_state.get("margin",4000), step=500, key="margin")
+    item_cat = st.selectbox("Item Category", ITEMS, index=i_idx, key="item")
+with c_b:
+    margin = st.number_input("Margin ₹ / PC", value=st.session_state.get("margin",4000), step=500, key="margin")
 st.markdown('</div>', unsafe_allow_html=True)
 
-# STEP 3 - PRICING ONLY ATC
-st.markdown('<div class="step-card">', unsafe_allow_html=True)
-st.markdown(f"### Step 3 • Pricing — Only {len(detected)} Products from ATC Document")
+# PRICING - PREMIUM CARDS
+st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+st.markdown(f"##### 💰 Pricing Studio — Only {len(detected)} ATC Products")
 
 if detected:
     for p in detected:
-        if f"pr_{p}" not in st.session_state:
-            st.session_state[f"pr_{p}"] = MARKET.get(p,0)
-
+        if f"pr_{p}" not in st.session_state: st.session_state[f"pr_{p}"] = MARKET.get(p,0)
     prices={}; total=0
     cols=st.columns(3)
     for i, comp in enumerate(detected):
         with cols[i%3]:
-            st.markdown('<div class="product-card">', unsafe_allow_html=True)
-            st.markdown(f"**{comp}** <span class='market-tag'>₹{MARKET.get(comp,0):,}</span>", unsafe_allow_html=True)
+            st.markdown('<div class="prod-card">', unsafe_allow_html=True)
+            st.markdown(f'<div class="prod-head"><span class="prod-name">{comp}</span><span class="price-pill">₹{st.session_state[f"pr_{comp}"]:,}</span></div><div class="market-pill">Market ₹{MARKET.get(comp,0):,}</div>', unsafe_allow_html=True)
             v = st.number_input(comp, value=st.session_state[f"pr_{comp}"], key=f"pr_{comp}", label_visibility="collapsed")
             prices[comp]=v; total+=v
             st.markdown('</div>', unsafe_allow_html=True)
@@ -222,26 +248,28 @@ if detected:
     total_bid_val = grand*qty
 
     m1,m2,m3,m4 = st.columns(4)
-    m1.metric("Base", f"₹{total:,}")
+    m1.metric("Base Cost", f"₹{total:,}")
     m2.metric("Margin", f"₹{margin:,}")
     m3.metric("GST 18%", f"₹{gst:,}")
     m4.metric("Grand / PC", f"₹{grand:,}")
 
     st.markdown(f"""
-    <div style="background:#0F172A; color:white; padding:16px; border-radius:12px; text-align:center;">
-    <b>Total: ₹{total_bid_val:,} for {qty} Units | {dept} | {bid_no}</b>
+    <div style="background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%); padding:18px; border-radius:14px; color:white; text-align:center; position:relative; overflow:hidden; margin-top:10px;">
+    <div style="position:absolute; top:-30px; left:20%; width:150px; height:150px; background: radial-gradient(circle, #FF9933 0%, transparent 70%); opacity:0.2;"></div>
+    <div style="font-size:12px; opacity:0.6; letter-spacing:1px;">TOTAL BID VALUE</div>
+    <div style="font-size:24px; font-weight:800; margin-top:4px;">₹{total_bid_val:,} • {qty} Units</div>
+    <div style="font-size:12px; opacity:0.6; margin-top:4px;">{dept} | {bid_no} | {item_cat}</div>
     </div>
     """, unsafe_allow_html=True)
 
     df = pd.DataFrame(
         [["Department",dept],["Organisation",org],["Bid No",bid_no],["Item",item_cat],["Qty",qty],
-         ["ATC File", atc_file.name if atc_file else "Not Uploaded"],["Bid File", bid_file.name if bid_file else "Not Uploaded"],
-         ["ATC Products",", ".join(detected)]]+list(prices.items())+[["Base",total],["Margin",margin],["GST",gst],["Grand",grand],["Total Bid",total_bid_val]],
+         ["ATC File", atc_file.name if atc_file else "No"],["Bid File", bid_file.name if bid_file else "No"],
+         ["Products",", ".join(detected)]]+list(prices.items())+[["Base",total],["Margin",margin],["GST",gst],["Grand",grand],["Total Bid",total_bid_val]],
         columns=["Field","Value"]
     )
     st.dataframe(df, use_container_width=True)
-    st.download_button("📥 Download Tracked CSV", df.to_csv(index=False).encode(), f"TRACKED_{bid_no}.csv", use_container_width=True)
+    st.download_button("📥 Download Premium Report", df.to_csv(index=False).encode(), f"GeM_{bid_no}.csv", use_container_width=True, type="primary")
 else:
-    st.warning("Upload ATC document to track products for pricing")
-
+    st.info("⬆️ Upload ATC PDF to see premium pricing cards")
 st.markdown('</div>', unsafe_allow_html=True)

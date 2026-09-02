@@ -5,7 +5,6 @@ try:
     from pypdf import PdfReader
 except:
     from PyPDF2 import PdfReader
-from datetime import datetime
 
 st.set_page_config(page_title="GeM ATC Market Price", layout="wide", page_icon="📄")
 
@@ -14,12 +13,11 @@ st.markdown("""
 .stApp { background: linear-gradient(135deg, #f5f7fa 0%, #e4eaf5 100%); }
   h1 { background: linear-gradient(90deg, #FF9933 0%, #138808 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight:800!important; text-align:center; }
   div[data-testid="stMetric"] { background:white; padding:15px; border-radius:15px; box-shadow:0 4px 15px rgba(0,0,0,0.1); border-left:5px solid #138808; }
-  div[data-testid="stContainer"] { background:white; border-radius:12px!important; box-shadow:0 2px 10px rgba(0,0,0,0.05)!important; }
+  div[data-testid="stContainer"] { background:white; border-radius:12px!important; }
 .stDownloadButton>button { background: linear-gradient(90deg, #138808, #075E54); color:white; border-radius:25px; width:100%; height:50px; font-weight:bold;}
+.clear-btn>button { background: #ff4b4b!important; color:white!important; border-radius:20px!important; font-weight:bold; border:none; }
 </style>
 """, unsafe_allow_html=True)
-
-st.markdown("<h1>📄 GeM ATC Reader - Market Price</h1>", unsafe_allow_html=True)
 
 LIVE_MARKET_2026 = {
     "Processor CPU": 14500, "MB": 6500, "Graphics CARD": 0, "OS": 0, "RAM": 5200, "SSD": 3200,
@@ -64,6 +62,22 @@ def parse_meta(text):
     if m: item=m.group(1).strip()[:100]
     return org,item,bid,qty
 
+# TOP CLEAR BUTTON
+top1, top2 = st.columns([4,1])
+with top1:
+    st.markdown("<h1>📄 GeM ATC Reader - Market Price</h1>", unsafe_allow_html=True)
+with top2:
+    st.markdown('<div class="clear-btn">', unsafe_allow_html=True)
+    if st.button("🗑️ CLEAR ALL", use_container_width=True, key="clear_top"):
+        # Clear all session states
+        for key in list(st.session_state.keys()):
+            if key.startswith("p_") or key in ["margin", "dept", "org", "bid", "item", "qty", "dept_manual", "item_manual"]:
+                del st.session_state[key]
+        st.session_state.margin = 0
+        st.toast("✅ All fields cleared!", icon="🗑️")
+        st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
+
 with st.sidebar:
     st.markdown("### 📄 Upload ATC PDF")
     atc_file = st.file_uploader("ATC", type=["pdf"], label_visibility="collapsed")
@@ -78,32 +92,39 @@ with st.sidebar:
             st.session_state[f"p_{comp}"] = price
         st.toast("Market Price Updated")
         st.rerun()
+    st.divider()
+    # Also clear in sidebar
+    if st.button("🗑️ Clear All Fields", use_container_width=True):
+        for key in list(st.session_state.keys()):
+            if key.startswith("p_") or key in ["margin"]:
+                del st.session_state[key]
+        st.session_state.margin = 0
+        st.rerun()
 
 if atc_file:
     text = read_atc(atc_file)
     detected, reasons = detect(text)
     org_v,item_v,bid_v,qty_v = parse_meta(text)
     if not detected: detected = list(PRODUCT_KEYWORDS.keys())
-    st.success(f"✅ ATC Read - {len(detected)} products found: {', '.join(detected)}")
+    st.success(f"✅ ATC Read - {len(detected)} products: {', '.join(detected)}")
 else:
     text=""; detected=[]; reasons={}; org_v,item_v,bid_v,qty_v="","Desktop Computer","",65
-    st.info("Upload ATC PDF")
 
 c1,c2,c3 = st.columns(3)
 with c1:
     with st.container(border=True):
-        dept = st.selectbox("🏛️ Department", DEPT_OPTIONS, label_visibility="collapsed")
+        dept = st.selectbox("🏛️ Department", DEPT_OPTIONS, label_visibility="collapsed", key="dept")
 with c2:
     with st.container(border=True):
-        org = st.text_input("Organisation", value=org_v, label_visibility="collapsed")
-        bid_no = st.text_input("Bid No", value=bid_v, label_visibility="collapsed")
+        org = st.text_input("Organisation", value=org_v, label_visibility="collapsed", key="org")
+        bid_no = st.text_input("Bid No", value=bid_v, label_visibility="collapsed", key="bid")
 with c3:
     with st.container(border=True):
         idx=0
         for i,opt in enumerate(ITEM_OPTIONS):
             if opt.lower() in item_v.lower(): idx=i; break
-        item_cat = st.selectbox("📦 Item", ITEM_OPTIONS, index=idx, label_visibility="collapsed")
-        qty = st.number_input("Qty", 1, 5000, qty_v, label_visibility="collapsed")
+        item_cat = st.selectbox("📦 Item", ITEM_OPTIONS, index=idx, label_visibility="collapsed", key="item")
+        qty = st.number_input("Qty", 1, 5000, qty_v, label_visibility="collapsed", key="qty")
 
 products = detected if detected else list(PRODUCT_KEYWORDS.keys())
 
@@ -126,7 +147,7 @@ for i, comp in enumerate(products):
             prices[comp]=p
             total+=p
 
-margin = st.session_state.margin
+margin = st.session_state.get("margin", 0)
 gst = int((total+margin)*0.18)
 grand = total+margin+gst
 total_bid = grand*qty

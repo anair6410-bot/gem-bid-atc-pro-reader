@@ -26,9 +26,8 @@ except:
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
-from openpyxl.utils.dataframe import dataframe_to_rows
 
-st.set_page_config(page_title="GeM Proper Excel", layout="wide", page_icon="🇮🇳")
+st.set_page_config(page_title="GeM Proper Excel Fixed", layout="wide", page_icon="🇮🇳")
 
 st.markdown("""
 <style>
@@ -51,6 +50,16 @@ KEYWORDS = {
     "UPS": ["ups"], "PRINTER": ["printer"], "SCANNER": ["scanner"], "HDD": ["hdd"], "LAPTOP": ["laptop"]
 }
 
+def safe_str(x):
+    """FIX: Convert float NaN to string safely"""
+    if pd.isna(x):
+        return ""
+    return str(x)
+
+def safe_lower(x):
+    """FIX: Safe lower for float"""
+    return safe_str(x).lower()
+
 def enhance_image(pil_image):
     try:
         if CV2_AVAILABLE:
@@ -64,8 +73,7 @@ def enhance_image(pil_image):
         else:
             img = pil_image.convert('L')
             enhancer = ImageEnhance.Contrast(img)
-            img = enhancer.enhance(2.0)
-            return img
+            return enhancer.enhance(2.0)
     except:
         return pil_image
 
@@ -78,7 +86,7 @@ def read_pdf_text(file):
         return ""
 
 def read_atc_any(file):
-    filename = file.name.lower()
+    filename = safe_lower(file.name)
     file.seek(0)
     if filename.endswith(('.jpg','.jpeg','.png','.bmp','.webp')):
         if not OCR_AVAILABLE: return "", "image", "OCR missing"
@@ -109,13 +117,13 @@ def read_atc_any(file):
 
 def parse_atc_components(atc_text):
     if not atc_text: return [], {}
-    low=atc_text.lower()
+    low=safe_lower(atc_text)
     required=[]; spec_map={}
     for prod,kws in KEYWORDS.items():
         for kw in kws:
             if kw in low:
                 for line in atc_text.split("\n"):
-                    if kw in line.lower() and 5<len(line)<250:
+                    if safe_lower(kw) in safe_lower(line) and 5<len(line)<250:
                         if prod not in spec_map: spec_map[prod]=line.strip()
                 if prod not in required: required.append(prod)
                 break
@@ -124,201 +132,143 @@ def parse_atc_components(atc_text):
 def parse_bid_meta(bid_text):
     data={'bid_no':"", 'org':"", 'dept':"", 'item':"Desktop Computer", 'qty':65}
     try:
-        m=re.search(r'GEM\/\d{4}\/B\/\d{4,10}', bid_text.replace(" ","").upper())
+        m=re.search(r'GEM\/\d{4}\/B\/\d{4,10}', safe_str(bid_text).replace(" ","").upper())
         data['bid_no']=m.group(0) if m else ""
-        m=re.search(r'Organisation\s*Name\s*[:\-]?\s*([^\n]+)', bid_text, re.I)
-        data['org']=m.group(1).strip()[:100] if m else ""
-        m=re.search(r'Quantity\s*[:\-]?\s*(\d+)', bid_text, re.I)
+        m=re.search(r'Organisation\s*Name\s*[:\-]?\s*([^\n]+)', safe_str(bid_text), re.I)
+        data['org']=safe_str(m.group(1).strip()[:100]) if m else ""
+        m=re.search(r'Quantity\s*[:\-]?\s*(\d+)', safe_str(bid_text), re.I)
         data['qty']=int(m.group(1)) if m else 65
     except: pass
     return data
 
 def is_compatible(atc_spec, model, specs):
-    atc=(atc_spec or "").lower()
-    m=f"{model} {specs}".lower()
+    atc=safe_lower(atc_spec)
+    m=safe_lower(f"{model} {specs}")
     if "i5" in atc and "i3" in m: return False, "ATC i5 vs i3"
     if "16 gb" in atc and "8 gb" in m: return False, "ATC 16GB"
     if "512" in atc and "256" in m: return False, "ATC 512GB"
     return True, "Compatible"
 
 def create_proper_excel(bid_meta, df_comp, df_other, atc_products, atc_type):
-    """Create Proper Formatted Excel with 4 Sheets"""
     wb = Workbook()
-
-    # Styles
     header_font = Font(name='Calibri', bold=True, color="FFFFFF", size=11)
     header_fill = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
-    sub_header_fill = PatternFill(start_color="DBEAFE", end_color="DBEAFE", fill_type="solid")
-    sub_header_fill2 = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
-    other_fill = PatternFill(start_color="FFFBEB", end_color="FFFBEB", fill_type="solid")
-    border = Border(
-        left=Side(style='thin'), right=Side(style='thin'),
-        top=Side(style='thin'), bottom=Side(style='thin')
-    )
+    border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
     bold = Font(bold=True)
 
-    # ===== SHEET 1: SUMMARY =====
+    # Sheet 1: Summary
     ws1 = wb.active
     ws1.title = "Bid Summary"
-
     ws1.merge_cells('A1:E1')
-    ws1['A1'] = f"GeM Bid Proposal - {bid_meta.get('bid_no','')}"
-    ws1['A1'].font = Font(name='Calibri', bold=True, size=14, color="0F172A")
-    ws1['A1'].alignment = Alignment(horizontal='center')
-
-    ws1.merge_cells('A2:E2')
-    ws1['A2'] = f"Generated on {datetime.now().strftime('%d-%m-%Y %H:%M')} | ATC Type: {atc_type.upper()} | Organisation: {bid_meta.get('org','')}"
-    ws1['A2'].font = Font(size=10, italic=True, color="64748B")
+    ws1['A1'] = f"GeM Bid Proposal - {safe_str(bid_meta.get('bid_no',''))}"
+    ws1['A1'].font = Font(bold=True, size=14)
 
     summary_data = [
-        ["Field", "Value (Auto-filled from Bid)"],
-        ["Bid Number", bid_meta.get('bid_no','')],
-        ["Organisation", bid_meta.get('org','')],
-        ["Department", bid_meta.get('dept','')],
-        ["Item Category", bid_meta.get('item','')],
+        ["Field", "Value"],
+        ["Bid Number", safe_str(bid_meta.get('bid_no',''))],
+        ["Organisation", safe_str(bid_meta.get('org',''))],
         ["Quantity", bid_meta.get('qty',65)],
         ["ATC Products Required", len(atc_products)],
         ["ATC Compatible Found", len(df_comp) if not df_comp.empty else 0],
-        ["Other Products Available", len(df_other) if not df_other.empty else 0],
+        ["Other Products", len(df_other) if not df_other.empty else 0],
         [],
         ["Pricing Summary", ""],
-        ["Base Price (ATC Compatible)", f"=SUM('ATC Compatible'!D2:D100)" if not df_comp.empty else 0],
+        ["Base Price", f"=SUM('ATC Compatible'!D2:D100)" if not df_comp.empty else 0],
         ["Margin per PC", 4000],
-        ["GST 18%", f"=(B12+B13)*0.18"],
-        ["Grand Price per PC", f"=B12+B13+B14"],
-        ["Total Bid Value (Qty * Grand)", f"=B15*B6"],
+        ["GST 18%", f"=(B10+B11)*0.18"],
+        ["Grand Price per PC", f"=B10+B11+B12"],
+        ["Total Bid Value", f"=B13*B4"],
     ]
-
-    for r_idx, row in enumerate(summary_data, start=4):
+    for r_idx, row in enumerate(summary_data, start=3):
         for c_idx, val in enumerate(row, start=1):
             cell = ws1.cell(row=r_idx, column=c_idx, value=val)
-            if r_idx==4 or r_idx==11: # headers
+            cell.border = border
+            if r_idx==3 or r_idx==9:
                 cell.font = header_font
                 cell.fill = header_fill
-                cell.border = border
-            else:
-                cell.border = border
 
-    for col in ['A','B']:
-        ws1.column_dimensions[col].width = 35
+    for col in ['A','B']: ws1.column_dimensions[col].width = 35
 
-    # ===== SHEET 2: ATC Compatible =====
+    # Sheet 2: ATC Compatible
     ws2 = wb.create_sheet("ATC Compatible")
-
-    ws2.merge_cells('A1:F1')
-    ws2['A1'] = f"ATC Required Products - Compatible Models (Bid: {bid_meta.get('bid_no','')})"
-    ws2['A1'].font = Font(bold=True, size=12)
-    ws2['A1'].fill = sub_header_fill
-
-    headers = ["S.No", "Product (From ATC)", "ATC Spec (Exact from ATC)", "Compatible Model (From Master)", "Price (₹)", "Reason / Compatibility"]
+    headers = ["S.No", "Product (From ATC)", "ATC Spec", "Compatible Model", "Price (₹)", "Reason"]
     for c, h in enumerate(headers, start=1):
-        cell = ws2.cell(row=2, column=c, value=h)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.border = border
-        cell.alignment = Alignment(horizontal='center')
+        cell = ws2.cell(row=1, column=c, value=h)
+        cell.font = header_font; cell.fill = header_fill; cell.border = border
 
     if not df_comp.empty:
-        for r_idx, (_, row) in enumerate(df_comp.iterrows(), start=3):
-            ws2.cell(row=r_idx, column=1, value=r_idx-2).border = border
-            ws2.cell(row=r_idx, column=2, value=row.get('Product','')).border = border
-            ws2.cell(row=r_idx, column=3, value=row.get('ATC Spec','')).border = border
-            ws2.cell(row=r_idx, column=4, value=row.get('Compatible Model','')).border = border
-            ws2.cell(row=r_idx, column=5, value=row.get('Price',0)).border = border
-            ws2.cell(row=r_idx, column=5).number_format = '₹#,##0'
-            ws2.cell(row=r_idx, column=6, value=row.get('Reason','')).border = border
+        for r_idx, (_, row) in enumerate(df_comp.iterrows(), start=2):
+            ws2.cell(row=r_idx, column=1, value=r_idx-1).border=border
+            ws2.cell(row=r_idx, column=2, value=safe_str(row.get('Product',''))).border=border
+            ws2.cell(row=r_idx, column=3, value=safe_str(row.get('ATC Spec',''))).border=border
+            ws2.cell(row=r_idx, column=4, value=safe_str(row.get('Compatible Model',''))).border=border
+            ws2.cell(row=r_idx, column=5, value=row.get('Price',0)).border=border
+            ws2.cell(row=r_idx, column=5).number_format='₹#,##0'
+            ws2.cell(row=r_idx, column=6, value=safe_str(row.get('Reason',''))).border=border
 
-        # Total row
-        total_row = len(df_comp) + 3
-        ws2.cell(row=total_row, column=2, value="TOTAL BASE PRICE").font = bold
-        ws2.cell(row=total_row, column=2).border = border
-        ws2.cell(row=total_row, column=5, value=f"=SUM(E3:E{total_row-1})").font = bold
-        ws2.cell(row=total_row, column=5).border = border
-        ws2.cell(row=total_row, column=5).number_format = '₹#,##0'
+        total_row = len(df_comp)+2
+        ws2.cell(row=total_row, column=2, value="TOTAL").font=bold; ws2.cell(row=total_row, column=2).border=border
+        ws2.cell(row=total_row, column=5, value=f"=SUM(E2:E{total_row-1})").font=bold; ws2.cell(row=total_row, column=5).border=border
 
-    for col, width in zip(['A','B','C','D','E','F'], [8,20,35,30,15,20]):
-        ws2.column_dimensions[col].width = width
+    for col, w in zip(['A','B','C','D','E','F'], [8,20,35,30,15,20]): ws2.column_dimensions[col].width=w
 
-    # ===== SHEET 3: Other Products =====
+    # Sheet 3: Other Products
     ws3 = wb.create_sheet("Other Products")
-
-    ws3.merge_cells('A1:E1')
-    ws3['A1'] = "Other Products - Available in Master List (Not Required in ATC but can be mentioned)"
-    ws3['A1'].font = Font(bold=True, size=12)
-    ws3['A1'].fill = PatternFill(start_color="FDE68A", end_color="FDE68A", fill_type="solid")
-
     headers3 = ["S.No", "Other Product", "Available Model", "Price (₹)", "Specs"]
     for c, h in enumerate(headers3, start=1):
-        cell = ws3.cell(row=2, column=c, value=h)
-        cell.font = header_font
-        cell.fill = PatternFill(start_color="D97706", end_color="D97706", fill_type="solid")
-        cell.border = border
+        cell=ws3.cell(row=1, column=c, value=h)
+        cell.font=header_font; cell.fill=PatternFill(start_color="D97706", end_color="D97706", fill_type="solid"); cell.border=border
 
     if not df_other.empty:
-        for r_idx, (_, row) in enumerate(df_other.iterrows(), start=3):
-            ws3.cell(row=r_idx, column=1, value=r_idx-2).border = border
-            ws3.cell(row=r_idx, column=2, value=row.get('Other Product','')).border = border
-            ws3.cell(row=r_idx, column=2).fill = other_fill
-            ws3.cell(row=r_idx, column=3, value=row.get('Available Model','')).border = border
-            ws3.cell(row=r_idx, column=4, value=row.get('Price (₹)',0)).border = border
-            ws3.cell(row=r_idx, column=4).number_format = '₹#,##0'
-            ws3.cell(row=r_idx, column=5, value=row.get('Specs','')).border = border
+        for r_idx, (_, row) in enumerate(df_other.iterrows(), start=2):
+            ws3.cell(row=r_idx, column=1, value=r_idx-1).border=border
+            ws3.cell(row=r_idx, column=2, value=safe_str(row.get('Other Product',''))).border=border
+            ws3.cell(row=r_idx, column=3, value=safe_str(row.get('Available Model',''))).border=border
+            ws3.cell(row=r_idx, column=4, value=row.get('Price (₹)',0)).border=border
+            ws3.cell(row=r_idx, column=4).number_format='₹#,##0'
+            ws3.cell(row=r_idx, column=5, value=safe_str(row.get('Specs',''))).border=border
 
-    for col, width in zip(['A','B','C','D','E'], [8,20,30,15,35]):
-        ws3.column_dimensions[col].width = width
+    for col, w in zip(['A','B','C','D','E'], [8,20,30,15,35]): ws3.column_dimensions[col].width=w
 
-    # ===== SHEET 4: Final Combined =====
+    # Sheet 4: Final Combined
     ws4 = wb.create_sheet("Final Combined List")
-
-    ws4.merge_cells('A1:F1')
-    ws4['A1'] = f"FINAL COMBINED LIST - ATC + Other Products | Bid: {bid_meta.get('bid_no','')} | Qty: {bid_meta.get('qty','')}"
-    ws4['A1'].font = Font(bold=True, size=12)
-    ws4['A1'].fill = header_fill
-    ws4['A1'].font = Font(bold=True, color="FFFFFF")
-
     headers4 = ["Type", "Product", "Model", "Price (₹)", "Specs / ATC Spec", "Compatibility"]
     for c, h in enumerate(headers4, start=1):
-        cell = ws4.cell(row=2, column=c, value=h)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.border = border
+        cell=ws4.cell(row=1, column=c, value=h)
+        cell.font=header_font; cell.fill=header_fill; cell.border=border
 
-    row_num = 3
+    row_num=2
     if not df_comp.empty:
         for _, r in df_comp.iterrows():
-            ws4.cell(row=row_num, column=1, value="ATC Required").border = border
-            ws4.cell(row=row_num, column=1).fill = sub_header_fill
-            ws4.cell(row=row_num, column=2, value=r.get('Product','')).border = border
-            ws4.cell(row=row_num, column=3, value=r.get('Compatible Model','')).border = border
-            ws4.cell(row=row_num, column=4, value=r.get('Price',0)).border = border
-            ws4.cell(row=row_num, column=4).number_format = '₹#,##0'
-            ws4.cell(row=row_num, column=5, value=r.get('ATC Spec','')).border = border
-            ws4.cell(row=row_num, column=6, value=r.get('Compatibility','')).border = border
+            ws4.cell(row=row_num, column=1, value="ATC Required").border=border
+            ws4.cell(row=row_num, column=2, value=safe_str(r.get('Product',''))).border=border
+            ws4.cell(row=row_num, column=3, value=safe_str(r.get('Compatible Model',''))).border=border
+            ws4.cell(row=row_num, column=4, value=r.get('Price',0)).border=border
+            ws4.cell(row=row_num, column=4).number_format='₹#,##0'
+            ws4.cell(row=row_num, column=5, value=safe_str(r.get('ATC Spec',''))).border=border
+            ws4.cell(row=row_num, column=6, value=safe_str(r.get('Compatibility',''))).border=border
             row_num+=1
 
     if not df_other.empty:
         for _, r in df_other.iterrows():
-            ws4.cell(row=row_num, column=1, value="Other Product").border = border
-            ws4.cell(row=row_num, column=1).fill = other_fill
-            ws4.cell(row=row_num, column=2, value=r.get('Other Product','')).border = border
-            ws4.cell(row=row_num, column=3, value=r.get('Available Model','')).border = border
-            ws4.cell(row=row_num, column=4, value=r.get('Price (₹)',0)).border = border
-            ws4.cell(row=row_num, column=4).number_format = '₹#,##0'
-            ws4.cell(row=row_num, column=5, value=r.get('Specs','')).border = border
-            ws4.cell(row=row_num, column=6, value="Optional Mention").border = border
+            ws4.cell(row=row_num, column=1, value="Other Product").border=border
+            ws4.cell(row=row_num, column=2, value=safe_str(r.get('Other Product',''))).border=border
+            ws4.cell(row=row_num, column=3, value=safe_str(r.get('Available Model',''))).border=border
+            ws4.cell(row=row_num, column=4, value=r.get('Price (₹)',0)).border=border
+            ws4.cell(row=row_num, column=4).number_format='₹#,##0'
+            ws4.cell(row=row_num, column=5, value=safe_str(r.get('Specs',''))).border=border
+            ws4.cell(row=row_num, column=6, value="Optional Mention").border=border
             row_num+=1
 
-    for col, width in zip(['A','B','C','D','E','F'], [15,20,30,15,35,18]):
-        ws4.column_dimensions[col].width = width
+    for col, w in zip(['A','B','C','D','E','F'], [15,20,30,15,35,18]): ws4.column_dimensions[col].width=w
 
-    # Save to buffer
     buffer = io.BytesIO()
     wb.save(buffer)
     buffer.seek(0)
     return buffer
 
-# HEADER
-st.markdown('<div class="hero"><div style="font-size:20px; font-weight:800;">🇮🇳 GeM — Proper Excel Export 📊</div><div style="font-size:11px; opacity:0.7;">ATC Image + Bid + Master → Proper Formatted Excel with 4 Sheets</div></div><div class="tricolor"></div>', unsafe_allow_html=True)
+# UI
+st.markdown('<div class="hero"><div style="font-size:20px; font-weight:800;">🇮🇳 GeM — Proper Excel Fixed ✅</div><div style="font-size:11px; opacity:0.7;">Float-safe + Proper Excel with 4 sheets</div></div><div class="tricolor"></div>', unsafe_allow_html=True)
 
 if st.button("🗑️ Clear All", type="primary"):
     for k in list(st.session_state.keys()): del st.session_state[k]
@@ -338,7 +288,7 @@ with c1:
             atc_products, atc_spec_map = parse_atc_components(atc_text)
             st.success(f"✅ {len(atc_products)} comps | {atc_type}")
         else:
-            st.error("❌ Could not read ATC")
+            st.error("❌ Could not read ATC - try clearer image or text PDF")
     st.markdown('</div>', unsafe_allow_html=True)
 
 with c2:
@@ -361,7 +311,10 @@ with c3:
     if master_file:
         try:
             df_master = pd.read_excel(master_file) if not master_file.name.endswith('.csv') else pd.read_csv(master_file)
-            st.success(f"✅ {len(df_master)} models")
+            # FIX: Clean NaN immediately
+            df_master = df_master.fillna("")
+            st.success(f"✅ {len(df_master)} models loaded (NaN cleaned)")
+            st.dataframe(df_master.head(2), use_container_width=True)
         except Exception as e:
             st.error(f"{e}")
     st.markdown('</div>', unsafe_allow_html=True)
@@ -369,55 +322,86 @@ st.markdown('</div>', unsafe_allow_html=True)
 
 if atc_file and bid_file and master_file and df_master is not None and not df_master.empty:
 
-    df_master.columns = [str(c).strip().lower() for c in df_master.columns]
+    # FIX: Clean master fully - remove float NaN
+    df_master = df_master.fillna("")
+    for col in df_master.columns:
+        df_master[col] = df_master[col].apply(lambda x: "" if pd.isna(x) else x)
+
+    df_master.columns = [safe_str(c).strip().lower() for c in df_master.columns]
     prod_col = next((c for c in df_master.columns if 'product' in c or 'component' in c), df_master.columns[0])
     model_col = next((c for c in df_master.columns if 'model' in c), df_master.columns[1] if len(df_master.columns)>1 else prod_col)
     price_col = next((c for c in df_master.columns if 'price' in c or 'rate' in c), df_master.columns[2] if len(df_master.columns)>2 else prod_col)
     specs_col = next((c for c in df_master.columns if 'spec' in c), None)
 
     if len(atc_products)==0:
-        atc_products = list(df_master[prod_col].astype(str).unique())[:15]
+        # FIX: Use safe_str
+        unique_prods = [safe_str(x) for x in df_master[prod_col].unique().tolist() if safe_str(x).strip()!=""]
+        atc_products = unique_prods[:15]
 
     fresh_rows=[]; other_rows=[]
+
     for comp in atc_products:
-        mask = df_master[prod_col].astype(str).str.lower().str.contains(comp.lower().split()[0], na=False)
+        comp_safe = safe_str(comp)
+        if not comp_safe.strip():
+            continue
+        # FIX: Safe lower comparison
+        mask = df_master[prod_col].apply(lambda x: safe_lower(x).find(safe_lower(comp_safe).split()[0])!=-1 if safe_lower(comp_safe).split() else False)
         df_filtered = df_master[mask] if mask.any() else pd.DataFrame()
+
         if df_filtered.empty:
-            for kw in KEYWORDS.get(comp, [comp.lower()]):
-                mask = df_master[prod_col].astype(str).str.lower().str.contains(kw, na=False)
+            for kw in KEYWORDS.get(comp_safe, [safe_lower(comp_safe)]):
+                kw_safe = safe_lower(kw)
+                mask = df_master[prod_col].apply(lambda x: kw_safe in safe_lower(x)) | df_master[model_col].apply(lambda x: kw_safe in safe_lower(x))
                 if mask.any():
                     df_filtered = df_master[mask]
                     break
+
         if df_filtered.empty:
-            fresh_rows.append({"Product": comp, "ATC Spec": atc_spec_map.get(comp, ""), "Compatible Model": "Not in Master", "Price": 0, "Compatibility": "❌ Missing", "Reason": "Add"})
+            fresh_rows.append({"Product": comp_safe, "ATC Spec": safe_str(atc_spec_map.get(comp_safe, "")), "Compatible Model": "Not in Master", "Price": 0, "Compatibility": "❌ Missing", "Reason": "Add"})
             continue
+
         found=False
         for _, row in df_filtered.iterrows():
             try:
-                model=str(row[model_col]); specs=str(row[specs_col]) if specs_col and specs_col in row else ""; price=row[price_col]
-                ok,reason=is_compatible(atc_spec_map.get(comp, ""),model,specs)
+                model=safe_str(row[model_col]); specs=safe_str(row[specs_col]) if specs_col and specs_col in row else ""; price=row[price_col]
+                # price can be float/string - convert
+                try: price_val = float(price) if price!="" else 0
+                except: price_val = price
+
+                ok,reason=is_compatible(atc_spec_map.get(comp_safe, ""),model,specs)
                 if ok:
-                    fresh_rows.append({"Product": comp, "ATC Spec": atc_spec_map.get(comp, ""), "Compatible Model": model, "Price": price, "Specs": specs, "Compatibility": "✅ Compatible", "Reason": reason})
+                    fresh_rows.append({"Product": comp_safe, "ATC Spec": safe_str(atc_spec_map.get(comp_safe, "")), "Compatible Model": model, "Price": price_val, "Specs": specs, "Compatibility": "✅ Compatible", "Reason": reason})
                     found=True; break
             except: continue
+
         if not found:
             try:
-                row=df_filtered.iloc[0]; model=str(row[model_col]); specs=str(row[specs_col]) if specs_col and specs_col in df_filtered.columns else ""; price=row[price_col]
-                fresh_rows.append({"Product": comp, "ATC Spec": atc_spec_map.get(comp, ""), "Compatible Model": model, "Price": price, "Specs": specs, "Compatibility": "❌ Not Compatible", "Reason": "Check spec"})
+                row=df_filtered.iloc[0]
+                model=safe_str(row[model_col]); specs=safe_str(row[specs_col]) if specs_col and specs_col in df_filtered.columns else ""
+                price=row[price_col]
+                try: price_val = float(price) if price!="" else 0
+                except: price_val = price
+                fresh_rows.append({"Product": comp_safe, "ATC Spec": safe_str(atc_spec_map.get(comp_safe, "")), "Compatible Model": model, "Price": price_val, "Specs": specs, "Compatibility": "❌ Not Compatible", "Reason": "Check spec"})
             except: pass
 
-    all_master_products = df_master[prod_col].astype(str).unique().tolist()
+    # Other products - FIX float issue here too
+    all_master_products = [safe_str(x) for x in df_master[prod_col].unique().tolist() if safe_str(x).strip()!=""]
+    atc_lower = [safe_lower(p) for p in atc_products]
+
     for prod in all_master_products:
-        if prod.lower() not in [p.lower() for p in atc_products] and prod.lower().split()[0] not in [p.lower().split()[0] for p in atc_products]:
-            df_other_temp = df_master[df_master[prod_col].astype(str)==prod]
+        prod_lower = safe_lower(prod)
+        if prod_lower not in atc_lower and (prod_lower.split()[0] not in [p.split()[0] for p in atc_lower if p.split()] if prod_lower.split() else True):
+            df_other_temp = df_master[df_master[prod_col].apply(lambda x: safe_str(x)==prod)]
             if not df_other_temp.empty:
                 try:
+                    # Sort by price - handle non-numeric
+                    df_other_temp[price_col] = pd.to_numeric(df_other_temp[price_col], errors='coerce').fillna(0)
                     df_other_sorted = df_other_temp.sort_values(by=price_col, ascending=True)
                     row=df_other_sorted.iloc[0]
-                    other_rows.append({"Other Product": prod, "Available Model": str(row[model_col]), "Price (₹)": row[price_col], "Specs": str(row[specs_col]) if specs_col and specs_col in row else "", "Category": "Other"})
+                    other_rows.append({"Other Product": prod, "Available Model": safe_str(row[model_col]), "Price (₹)": row[price_col], "Specs": safe_str(row[specs_col]) if specs_col and specs_col in row else ""})
                 except:
                     row=df_other_temp.iloc[0]
-                    other_rows.append({"Other Product": prod, "Available Model": str(row[model_col]), "Price (₹)": row[price_col], "Specs": "", "Category": "Other"})
+                    other_rows.append({"Other Product": prod, "Available Model": safe_str(row[model_col]), "Price (₹)": row[price_col], "Specs": ""})
 
     df_fresh = pd.DataFrame(fresh_rows) if fresh_rows else pd.DataFrame(columns=["Product","ATC Spec","Compatible Model","Price","Compatibility","Reason"])
     df_other = pd.DataFrame(other_rows) if other_rows else pd.DataFrame(columns=["Other Product","Available Model","Price (₹)","Specs"])
@@ -428,58 +412,32 @@ if atc_file and bid_file and master_file and df_master is not None and not df_ma
     tab1,tab2,tab3 = st.tabs(["✅ ATC Compatible", "📦 Other Products", "📊 Proper Excel Download"])
 
     with tab1:
-        if not df_comp.empty:
-            st.dataframe(df_comp, use_container_width=True)
-        else:
-            st.dataframe(df_fresh, use_container_width=True)
+        if not df_comp.empty: st.dataframe(df_comp, use_container_width=True)
+        else: st.dataframe(df_fresh, use_container_width=True)
 
     with tab2:
-        if not df_other.empty:
-            st.dataframe(df_other, use_container_width=True)
-        else:
-            st.info("No other products")
+        if not df_other.empty: st.dataframe(df_other, use_container_width=True)
+        else: st.info("No other products")
 
     with tab3:
         st.markdown("### 📊 Proper Excel File — 4 Sheets Formatted")
-        st.markdown("""
-        **Excel contains:**
-        - **Sheet 1: Bid Summary** — Bid No, Org, Qty, Total Value with formulas
-        - **Sheet 2: ATC Compatible** — S.No, Product, ATC Spec, Compatible Model, Price (₹ formatted)
-        - **Sheet 3: Other Products** — Other product types with model & price
-        - **Sheet 4: Final Combined List** — ATC + Other together for submission
-        """)
 
         if not df_comp.empty or not df_other.empty:
             excel_buffer = create_proper_excel(bid_meta, df_comp, df_other, atc_products, atc_type)
-
-            st.success("✅ Proper Excel Generated!")
+            st.success("✅ Proper Excel Generated — Float-safe!")
 
             st.download_button(
                 label="📥 Download PROPER EXCEL FILE (4 Sheets, Formatted)",
                 data=excel_buffer,
-                file_name=f"GeM_Proper_{bid_meta.get('bid_no','Bid')}_{datetime.now().strftime('%d%m%Y')}.xlsx",
+                file_name=f"GeM_Proper_{safe_str(bid_meta.get('bid_no','Bid')).replace('/','_')}_{datetime.now().strftime('%d%m%Y')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
                 type="primary"
             )
-
-            # Also show preview
-            st.markdown("**Preview — Final Combined:**")
-            combined_preview = []
-            if not df_comp.empty:
-                for _, r in df_comp.iterrows():
-                    combined_preview.append([ "ATC Required", r.get('Product',''), r.get('Compatible Model',''), r.get('Price',0), r.get('ATC Spec','') ])
-            if not df_other.empty:
-                for _, r in df_other.iterrows():
-                    combined_preview.append([ "Other Product", r.get('Other Product',''), r.get('Available Model',''), r.get('Price (₹)',0), r.get('Specs','') ])
-            if combined_preview:
-                df_prev = pd.DataFrame(combined_preview, columns=["Type","Product","Model","Price","Specs"])
-                st.dataframe(df_prev, use_container_width=True)
-
         else:
             st.warning("No data to generate Excel")
 
     st.markdown('</div>', unsafe_allow_html=True)
 
 elif atc_file or bid_file or master_file:
-    st.info("⬆️ Upload all 3 files to get Proper Excel")
+    st.info("⬆️ Upload all 3 files")

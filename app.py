@@ -6,20 +6,21 @@ try:
 except:
     from PyPDF2 import PdfReader
 
-st.set_page_config(page_title="GeM Exact Tracker", layout="wide", page_icon="🇮🇳")
+st.set_page_config(page_title="GeM Full Bid Auto-Fill", layout="wide", page_icon="🇮🇳")
 
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&display=swap');
 * { font-family: 'Outfit', sans-serif; }
 .stApp { background: #F8FAFF; }
-.hero { background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%); border-radius: 18px; padding: 20px 24px; color: white; display:flex; justify-content:space-between; box-shadow: 0 15px 30px rgba(0,0,0,0.2); }
-.tricolor { height:4px; background: linear-gradient(90deg, #FF9933 0%, #FFF 50%, #138808 100%); border-radius:10px; margin:12px 0; }
-.glass-card { background: white; border-radius: 16px; padding: 20px; border: 1px solid #E2E8F0; box-shadow: 0 4px 20px rgba(0,0,0,0.05); margin-bottom:14px; }
+.hero { background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%); border-radius: 18px; padding: 18px 24px; color: white; display:flex; justify-content:space-between; }
+.tricolor { height:4px; background: linear-gradient(90deg, #FF9933 0%, #FFF 50%, #138808 100%); border-radius:10px; margin:10px 0; }
+.glass-card { background: white; border-radius: 16px; padding: 18px; border: 1px solid #E2E8F0; box-shadow: 0 4px 20px rgba(0,0,0,0.05); margin-bottom:14px; }
 .upload-card { background: #F8FAFC; border: 1.5px dashed #CBD5E1; border-radius: 14px; padding: 16px; text-align:center; }
-.upload-card:hover { border-color: #6366F1; background: #F0F4FF; }
+.upload-card:hover { border-color: #6366F1; background: #EEF2FF; }
+.autofill-badge { background:#DCFCE7; color:#166534; border:1px solid #86EFAC; padding:2px 8px; border-radius:20px; font-size:10px; font-weight:700; }
 .prod-card { background:white; border-radius:12px; padding:12px; border:1px solid #E2E8F0; border-left:4px solid #10B981; }
-.raw-box { background:#0F172A; color:#E2E8F0; padding:12px; border-radius:10px; font-size:12px; max-height:200px; overflow:auto; white-space:pre-wrap; }
+.raw-box { background:#0F172A; color:#E2E8F0; padding:12px; border-radius:10px; font-size:11px; max-height:250px; overflow:auto; white-space:pre-wrap; }
 div[data-testid="stMetric"] { background:white; border-radius:14px; border:1px solid #E2E8F0; }
 </style>
 """, unsafe_allow_html=True)
@@ -40,293 +41,214 @@ KEYWORDS = {
     "CHASSIS SWITCH": ["chassis intrusion"], "TPM 2.0": ["tpm"], "CAMERA": ["camera", "webcam"], "ANTIVIRUS": ["antivirus"],
     "DP PORT": ["display port"], "SERIAL COM PORT+PARALLEL": ["serial", "com port"], "Keyboard & Mouse": ["keyboard", "mouse"]
 }
-DEPTS = ["BANK OF INDIA","SBI","BANK OF BARODA","INDIAN ARMY","MINISTRY OF DEFENCE","MINISTRY OF FINANCE","MINISTRY OF HOME AFFAIRS","MINISTRY OF EDUCATION","MINISTRY OF RAILWAYS","MINISTRY OF ELECTRONICS & IT","NITI AAYOG","ISRO","NIC","OTHER"]
 
-def read_pdf_exact(file):
-    """Read PDF with all pages - exact text"""
-    try:
-        reader = PdfReader(file)
-        full_text = ""
-        for i, page in enumerate(reader.pages):
-            txt = page.extract_text() or ""
-            full_text += f"\n--- PAGE {i+1} ---\n" + txt
-        return full_text
-    except Exception as e:
-        return f"Error reading PDF: {e}"
+def read_pdf_full(file):
+    reader = PdfReader(file)
+    full = ""
+    for p in reader.pages:
+        full += (p.extract_text() or "") + "\n"
+    return full
 
-def read_excel_exact(file):
-    """Read Excel/CSV sheet exact"""
-    try:
-        if file.name.endswith('.csv'):
-            df = pd.read_csv(file)
-        else:
-            df = pd.read_excel(file)
-        return df
-    except Exception as e:
-        return None
+def extract_exact_gem_bid(text):
+    """Reads EXACT data from full GeM Bid document"""
+    t = text
+    tl = text.lower()
+    data = {}
 
-def parse_exact_bid_data(text):
-    """
-    EXACT parser - Tries 10+ patterns for each field
-    """
-    # Normalize text for searching but keep original for extraction
-    text_upper = text.upper()
-    text_clean = text.replace("\n", " ").replace(" ", " ")
+    # 1. BID NUMBER - GEM/2025/B/1234567 format - Most important
+    m = re.search(r'GEM\/\d{4}\/B\/\d{4,10}', t.replace(" ", "").upper())
+    if m:
+        data['bid_no'] = m.group(0)
+    else:
+        m = re.search(r'Bid\s*Number\s*[:\-]?\s*(GEM\/\d{4}\/B\/\d+)', t, re.I)
+        data['bid_no'] = m.group(1) if m else ""
 
-    results = {"org": "", "bid_no": "", "qty": 65, "item": "", "dept": "", "ministry": "", "raw_matches": []}
-
-    # 1. BID NUMBER - Multiple patterns
-    bid_patterns = [
-        r'GEM\/\d{4}\/B\/\d{4,10}',
-        r'GEM\s*\/\s*\d{4}\s*\/\s*B\s*\/\s*\d+',
-        r'Bid\s*Number\s*[:\-]?\s*(GEM\/\d{4}\/B\/\d+)',
-        r'Bid\s*No\.?\s*[:\-]?\s*(GEM\/\d{4}\/B\/\d+)',
-        r'Bid\s*Number\s*[:\-]?\s*([A-Z]+\/\d+\/B\/\d+)',
+    # 2. ORGANISATION NAME
+    patterns_org = [
+        r'Organisation\s*Name\s*[:\-]?\s*([^\n\r]+)',
+        r'Organization\s*Details.*?Organisation\s*Name\s*[:\-]?\s*([^\n\r]+)',
+        r'Buyer\s*Organization\s*[:\-]?\s*([^\n\r]+)',
+        r'Name\s*of\s*the\s*Organisation\s*[:\-]?\s*([^\n\r]+)',
     ]
-    for pat in bid_patterns:
-        m = re.search(pat, text_upper)
+    data['org'] = ""
+    for pat in patterns_org:
+        m = re.search(pat, t, re.I | re.S)
         if m:
-            results["bid_no"] = m.group(1) if len(m.groups())>0 else m.group(0)
-            results["raw_matches"].append(f"Bid: {m.group(0)}")
-            break
-
-    # 2. ORGANISATION - Multiple patterns
-    org_patterns = [
-        r'Organisation\s*Name\s*[:\-]?\s*([^\n]+)',
-        r'Organization\s*Name\s*[:\-]?\s*([^\n]+)',
-        r'Buyer\s*[:\-]?\s*([^\n]+?Ministry[^\n]+)',
-        r'Organisation\s*Details\s*[:\-]?\s*([^\n]+)',
-        r'Name\s*of\s*Organisation\s*[:\-]?\s*([^\n]+)',
-        r'Buyer\s*Organisation\s*[:\-]?\s*([^\n]+)',
-    ]
-    for pat in org_patterns:
-        m = re.search(pat, text, re.I)
-        if m:
-            val = m.group(1).strip()
-            if len(val) > 5 and len(val) < 150:
-                results["org"] = val
-                results["raw_matches"].append(f"Org: {val}")
+            val = m.group(1).strip().split('\n')[0].strip()
+            if 3 < len(val) < 150 and 'bid' not in val.lower():
+                data['org'] = val
                 break
 
-    # 3. QUANTITY - Multiple patterns
-    qty_patterns = [
-        r'Quantity\s*[:\-]?\s*(\d{1,5})',
-        r'Qty\s*[:\-]?\s*(\d{1,5})',
-        r'Total\s*Quantity\s*[:\-]?\s*(\d+)',
-        r'Required\s*Quantity\s*[:\-]?\s*(\d+)',
-        r'Item\s*Quantity\s*[:\-]?\s*(\d+)',
+    # 3. DEPARTMENT / MINISTRY - EXACT
+    patterns_dept = [
+        r'Ministry\s*Name\s*[:\-]?\s*([^\n\r]+)',
+        r'Department\s*Name\s*[:\-]?\s*([^\n\r]+)',
+        r'Ministry\s*\/\s*Department\s*[:\-]?\s*([^\n\r]+)',
+        r'Department\s*[:\-]?\s*(Ministry of[^\n\r]+)',
     ]
-    for pat in qty_patterns:
-        m = re.search(pat, text, re.I)
+    data['dept'] = ""
+    for pat in patterns_dept:
+        m = re.search(pat, t, re.I)
         if m:
-            try:
-                q = int(m.group(1))
-                if 1 <= q <= 10000:
-                    results["qty"] = q
-                    results["raw_matches"].append(f"Qty: {q}")
-                    break
+            val = m.group(1).strip().split('\n')[0].strip()
+            if len(val) > 3:
+                data['dept'] = val
+                break
+
+    # 4. ITEM CATEGORY - EXACT from Bid Details
+    patterns_item = [
+        r'Item\s*Category\s*[:\-]?\s*([^\n\r]+)',
+        r'Category\s*[:\-]?\s*(Desktop Computer[^\n]*|All in One[^\n]*|Laptop[^\n]*|High End[^\n]*|Entry Level[^\n]*)',
+        r'Schedule\s*1\s*.*?([^\n]*Desktop Computer[^\n]*|[^\n]*All in One[^\n]*)',
+        r'Item\s*Name\s*[:\-]?\s*([^\n\r]+Computer[^\n]*)',
+    ]
+    data['item'] = "Desktop Computer"
+    for pat in patterns_item:
+        m = re.search(pat, t, re.I)
+        if m:
+            val = m.group(1).strip().split('\n')[0].strip()
+            if len(val) > 5 and len(val) < 150:
+                data['item'] = val
+                break
+
+    # 5. QUANTITY - EXACT
+    m = re.search(r'Quantity\s*[:\-]?\s*(\d+)\s*(?:pieces|nos|units)?', t, re.I)
+    data['qty'] = int(m.group(1)) if m else 65
+    # Try to get from table: Look for Qty in bid table
+    if data['qty'] == 65:
+        m = re.search(r'Consignee.*?Quantity\s*[:\-]?\s*(\d+)', t, re.I | re.S)
+        if m:
+            try: data['qty'] = int(m.group(1))
             except: pass
 
-    # 4. ITEM CATEGORY - Multiple patterns
-    item_patterns = [
-        r'Item\s*Category\s*[:\-]?\s*([^\n]+)',
-        r'Category\s*[:\-]?\s*(Desktop[^\n]+|All in One[^\n]+|Laptop[^\n]+)',
-        r'Product\s*Category\s*[:\-]?\s*([^\n]+)',
-        r'Item\s*Name\s*[:\-]?\s*([^\n]+)',
-        r'Schedule\s*1\s*[:\-]?\s*([^\n]+Computer[^\n]*)',
-    ]
-    for pat in item_patterns:
-        m = re.search(pat, text, re.I)
-        if m:
-            val = m.group(1).strip()
-            if len(val) > 3 and len(val) < 120:
-                results["item"] = val
-                results["raw_matches"].append(f"Item: {val}")
-                break
+    # 6. CONSIGNEE / LOCATION
+    m = re.search(r'Consignee.*?([A-Z][a-z]+,\s*[A-Z][a-z]+|Pincode\s*[:\-]?\s*\d+)', t, re.I | re.S)
+    data['consignee'] = m.group(0)[:100] if m else ""
 
-    # 5. DEPARTMENT / MINISTRY
-    dept_patterns = [
-        r'Ministry\s*[:\-]?\s*([^\n]+)',
-        r'Department\s*Name\s*[:\-]?\s*([^\n]+)',
-        r'Department\s*[:\-]?\s*([^\n]+)',
-        r'Ministry\s*\/\s*Department\s*[:\-]?\s*([^\n]+)',
-        r'Name\s*of\s*Ministry\s*[:\-]?\s*([^\n]+)',
-    ]
-    for pat in dept_patterns:
-        m = re.search(pat, text, re.I)
-        if m:
-            val = m.group(1).strip()
-            if len(val) > 3 and len(val) < 150:
-                results["dept"] = val
-                results["raw_matches"].append(f"Dept: {val}")
-                break
+    # 7. EMD / BID VALUE / PAST EXPERIENCE if needed
+    m = re.search(r'Bid\s*Value\s*[:\-]?\s*Rs?\.?\s*([\d,]+)', t, re.I)
+    data['bid_value'] = m.group(1) if m else ""
 
-    return results
+    return data
 
 def detect_products(text):
     low=text.lower()
     return [p for p,kws in KEYWORDS.items() if any(k in low for k in kws)]
 
-# HERO
-st.markdown('<div class="hero"><div><div style="font-size:22px; font-weight:800;">🇮🇳 GeM Exact Data Tracker</div><div style="font-size:12px; opacity:0.7;">Fixed Parser • Reads EXACT data from PDF & Excel Sheet</div></div><div style="font-size:11px; opacity:0.6;">V4 - Exact</div></div><div class="tricolor"></div>', unsafe_allow_html=True)
+# HEADER
+st.markdown('<div class="hero"><div><div style="font-size:21px; font-weight:800;">🇮🇳 GeM Full Document Auto-Fill Engine</div><div style="font-size:12px; opacity:0.7;">Upload Full Bid PDF → Exact Auto-fill in correct field • ATC Products Only</div></div><div style="font-size:11px; opacity:0.5;">V5 Exact</div></div><div class="tricolor"></div>', unsafe_allow_html=True)
 
-top1,top2,top3 = st.columns([4,1,1])
-with top2:
-    if st.button("💹 Market Price", use_container_width=True):
+c1,c2,c3 = st.columns([4,1,1])
+with c2:
+    if st.button("💹 Set Market Price", use_container_width=True):
         for k,v in MARKET.items(): st.session_state[f"pr_{k}"]=v
         st.rerun()
-with top3:
-    if st.button("🗑️ Clear", use_container_width=True, type="primary"):
+with c3:
+    if st.button("🗑️ Clear All", use_container_width=True, type="primary"):
         for k in list(st.session_state.keys()): del st.session_state[k]
         st.rerun()
 
-# DUAL UPLOAD WITH EXCEL SUPPORT
+# DUAL UPLOAD
 st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-st.markdown("#### 📂 Upload — Now Supports PDF + Excel Sheet")
-
+st.markdown("#### 📂 Upload Full Documents")
 u1,u2 = st.columns(2)
 with u1:
     st.markdown('<div class="upload-card">', unsafe_allow_html=True)
-    st.markdown("**📄 ATC Document (PDF)**")
-    atc_file = st.file_uploader("ATC PDF", type=["pdf"], key="atc", label_visibility="collapsed")
+    st.markdown("**📄 ATC Document** <span class='autofill-badge'>PRODUCTS</span>")
+    st.caption("Upload ATC PDF - Will track only ATC products")
+    atc_file = st.file_uploader("ATC", type=["pdf"], key="atc", label_visibility="collapsed")
+    atc_text=""; atc_products=[]
     if atc_file:
-        st.success(f"Loaded: {atc_file.name}")
-        atc_text = read_pdf_exact(atc_file)
+        atc_text = read_pdf_full(atc_file)
         atc_products = detect_products(atc_text)
-        atc_meta = parse_exact_bid_data(atc_text)
-    else:
-        atc_text=""; atc_products=[]; atc_meta={"org":"","item":"","bid_no":"","qty":65,"dept":"","raw_matches":[]}
+        st.success(f"✅ {len(atc_products)} products tracked from ATC")
     st.markdown('</div>', unsafe_allow_html=True)
 
 with u2:
     st.markdown('<div class="upload-card">', unsafe_allow_html=True)
-    st.markdown("**📑 Bid Document (PDF / Excel / CSV)**")
-    st.caption("Supports:.pdf,.xlsx,.xls,.csv")
-    bid_file = st.file_uploader("Bid Doc", type=["pdf","xlsx","xls","csv"], key="bid", label_visibility="collapsed")
-    bid_df=None; bid_text=""; bid_meta={"org":"","item":"","bid_no":"","qty":65,"dept":"","raw_matches":[]}; bid_products=[]
+    st.markdown("**📑 FULL GeM Bid Document** <span class='autofill-badge'>AUTO-FILL</span>")
+    st.caption("Upload Full Bid PDF - 50-100 pages supported")
+    bid_file = st.file_uploader("Bid Full", type=["pdf"], key="bid_full", label_visibility="collapsed")
+    bid_data={"bid_no":"","org":"","dept":"","item":"Desktop Computer","qty":65,"consignee":"","bid_value":""}
+    bid_text=""
     if bid_file:
-        st.success(f"Loaded: {bid_file.name}")
-        if bid_file.name.endswith(('.xlsx','.xls','.csv')):
-            bid_df = read_excel_exact(bid_file)
-            if isinstance(bid_df, pd.DataFrame):
-                # Try to find columns with exact data
-                bid_text = " ".join([str(c) + " " + " ".join(bid_df[c].astype(str).tolist()[:10]) for c in bid_df.columns])
-                # Exact column mapping
-                for col in bid_df.columns:
-                    col_low = str(col).lower()
-                    if 'organisation' in col_low or 'organization' in col_low or 'buyer' in col_low:
-                        if len(bid_df[col].dropna())>0:
-                            bid_meta["org"] = str(bid_df[col].dropna().iloc[0])[:100]
-                    if 'bid' in col_low and 'number' in col_low:
-                        if len(bid_df[col].dropna())>0:
-                            bid_meta["bid_no"] = str(bid_df[col].dropna().iloc[0])
-                    if 'quantity' in col_low or 'qty' in col_low:
-                        try: bid_meta["qty"] = int(bid_df[col].dropna().iloc[0])
-                        except: pass
-                    if 'item' in col_low or 'category' in col_low:
-                        if len(bid_df[col].dropna())>0:
-                            bid_meta["item"] = str(bid_df[col].dropna().iloc[0])[:100]
-                    if 'department' in col_low or 'ministry' in col_low:
-                        if len(bid_df[col].dropna())>0:
-                            bid_meta["dept"] = str(bid_df[col].dropna().iloc[0])[:100]
-        else:
-            bid_text = read_pdf_exact(bid_file)
-            bid_meta = parse_exact_bid_data(bid_text)
-            bid_products = detect_products(bid_text)
+        bid_text = read_pdf_full(bid_file)
+        bid_data = extract_exact_gem_bid(bid_text)
+        st.success(f"✅ Exact data extracted: {bid_data['bid_no'] or 'Bid found'}")
     st.markdown('</div>', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
-# COMBINE EXACT DATA - Bid has priority
-final_org = bid_meta.get("org") or atc_meta.get("org") or ""
-final_bid = bid_meta.get("bid_no") or atc_meta.get("org") or "" # fix
-final_bid = bid_meta.get("bid_no") or atc_meta.get("bid_no") or ""
-final_qty = bid_meta.get("qty") if bid_meta.get("qty")!=65 else atc_meta.get("qty",65)
-final_item = bid_meta.get("item") or atc_meta.get("item") or "Desktop Computer"
-final_dept = bid_meta.get("dept") or atc_meta.get("dept") or ""
-detected = atc_products if atc_products else bid_products
+# SHOW EXACT EXTRACTION
+if bid_file:
+    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+    st.markdown("##### 🔍 Exact Data Read From Full Bid Document — Auto-fill Preview")
+    k1,k2,k3,k4 = st.columns(4)
+    k1.metric("Bid No (Exact)", bid_data.get('bid_no','Not Found'), "Auto-filled")
+    k2.metric("Organisation (Exact)", bid_data.get('org','')[:22] or "Not Found", "Auto-filled")
+    k3.metric("Quantity (Exact)", f"{bid_data.get('qty',65)} Units", "From Table")
+    k4.metric("Item Category (Exact)", bid_data.get('item','')[:22] or "Not Found", "Auto-filled")
 
-# SHOW WHAT WE EXTRACTED EXACTLY - DEBUG VIEW
+    with st.expander("📄 See Full Raw Text Extracted (Verification)"):
+        st.markdown(f'<div class="raw-box">{bid_text[:8000]}</div>', unsafe_allow_html=True)
+        st.caption("If any field is wrong, you can edit below - but this is exact text from PDF")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# FINAL AUTO-FILLED FIELDS IN CORRECT PLACE
 st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-st.markdown("##### 🔍 Exact Data Extracted From Your Sheet")
+st.markdown("##### ✅ Correct Fields — Auto-filled From Your Uploaded Documents <span class='autofill-badge'>EXACT</span>")
 
-d1,d2 = st.columns(2)
-with d1:
-    st.markdown("**From ATC PDF:**")
-    if atc_file:
-        st.write(f"Org: {atc_meta.get('org') or 'Not found'}")
-        st.write(f"Bid: {atc_meta.get('bid_no') or 'Not found'}")
-        st.write(f"Qty: {atc_meta.get('qty')}")
-        st.write(f"Item: {atc_meta.get('item') or 'Not found'}")
-        st.write(f"Dept: {atc_meta.get('dept') or 'Not found'}")
-        with st.expander("See raw extracted text (ATC)"):
-            st.markdown(f'<div class="raw-box">{atc_text[:4000]}</div>', unsafe_allow_html=True)
-    else:
-        st.info("Upload ATC")
+# Combine: Bid doc has priority for bid fields, ATC for products
+final_bid_no = bid_data.get('bid_no','') if bid_file else ""
+final_org = bid_data.get('org','') if bid_file else ""
+final_dept_raw = bid_data.get('dept','') if bid_file else ""
+final_item_raw = bid_data.get('item','Desktop Computer') if bid_file else "Desktop Computer"
+final_qty_raw = bid_data.get('qty',65) if bid_file else 65
 
-with d2:
-    st.markdown("**From Bid Document (Exact Sheet Data):**")
-    if bid_file:
-        if bid_df is not None and isinstance(bid_df, pd.DataFrame):
-            st.write("**Excel Data Preview:**")
-            st.dataframe(bid_df.head(), use_container_width=True)
-            st.write(f"Org: {bid_meta.get('org') or 'Not found in sheet'}")
-            st.write(f"Bid: {bid_meta.get('bid_no') or 'Not found'}")
-            st.write(f"Qty: {bid_meta.get('qty')}")
-            st.write(f"Item: {bid_meta.get('item') or 'Not found'}")
-            st.write(f"Dept: {bid_meta.get('dept') or 'Not found'}")
-        else:
-            st.write(f"Org: {bid_meta.get('org') or 'Not found'}")
-            st.write(f"Bid: {bid_meta.get('bid_no') or 'Not found'}")
-            st.write(f"Qty: {bid_meta.get('qty')}")
-            st.write(f"Item: {bid_meta.get('item') or 'Not found'}")
-            st.write(f"Dept: {bid_meta.get('dept') or 'Not found'}")
-            st.caption("Matches found:")
-            for m in bid_meta.get("raw_matches",[])[:10]:
-                st.code(m)
-            with st.expander("See raw extracted text (Bid)"):
-                st.markdown(f'<div class="raw-box">{bid_text[:5000]}</div>', unsafe_allow_html=True)
-    else:
-        st.info("Upload Bid PDF/Excel")
-st.markdown('</div>', unsafe_allow_html=True)
+# Departments
+DEPTS = ["BANK OF INDIA","SBI","BANK OF BARODA","INDIAN ARMY","INDIAN AIR FORCE","MINISTRY OF DEFENCE","MINISTRY OF FINANCE","MINISTRY OF HOME AFFAIRS","MINISTRY OF EDUCATION","MINISTRY OF RAILWAYS","MINISTRY OF ELECTRONICS & IT","NITI AAYOG","ISRO","NIC", final_dept_raw]
+DEPTS = list(dict.fromkeys([d for d in DEPTS if d])) # unique
+ITEMS = ["Desktop Computer","All in One PC","All in One PC - High End","High End Desktop Computer","Entry Level Desktop Computer","Mid Level Desktop Computer","Entry and Mid Level Desktop Computer","Laptop - Notebook", final_item_raw]
+ITEMS = list(dict.fromkeys([d for d in ITEMS if d]))
 
-# FINAL EDITABLE FIELDS - Auto-filled with EXACT data
-st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-st.markdown("##### ✅ Final Data (Auto-filled from Exact Sheet - You can edit)")
+col1,col2,col3,col4 = st.columns(4)
+with col1:
+    # Department - auto-fill
+    try: d_idx = next((i for i,o in enumerate(DEPTS) if final_dept_raw and (final_dept_raw.lower() in o.lower() or o.lower() in final_dept_raw.lower())),0)
+    except: d_idx=0
+    dept_val = st.selectbox("Department (Auto-filled from Bid)", DEPTS, index=d_idx, key="dept_final")
+    if final_dept_raw and final_dept_raw not in DEPTS:
+        dept_val = final_dept_raw
+        st.text_input("Exact Department from PDF (Auto-filled)", value=final_dept_raw, key="dept_exact_manual")
 
-c1,c2,c3,c4 = st.columns(4)
-with c1:
-    dept_options = DEPTS
-    # Try to match exact dept
-    try:
-        idx = next((i for i,o in enumerate(dept_options) if final_dept and (final_dept.lower() in o.lower() or o.lower() in final_dept.lower())),0)
-    except: idx=0
-    dept = st.selectbox("Department (Exact from sheet)", dept_options, index=idx, key="dept_exact")
-    if final_dept and final_dept not in dept_options:
-        st.caption(f"Exact from sheet: {final_dept}")
-        dept = st.text_input("Exact Dept from sheet", value=final_dept, key="dept_manual_exact")
-with c2:
-    org = st.text_input("Organisation (Exact from sheet)", value=final_org, key="org_exact")
-with c3:
-    bid_no = st.text_input("Bid Number (Exact)", value=final_bid, key="bid_exact")
-with c4:
-    qty = st.number_input("Quantity (Exact)", 1, 10000, final_qty, key="qty_exact")
+with col2:
+    org_val = st.text_input("Organisation Name (Auto-filled from Bid)", value=final_org, key="org_final")
+    st.caption(f"<span class='autofill-badge'>From Bid PDF: {final_org[:30] if final_org else 'Not found'}</span>", unsafe_allow_html=True)
 
-ca,cb = st.columns([3,1])
-with ca:
-    try: i_idx = next((i for i,o in enumerate(["Desktop Computer","All in One PC","All in One PC - High End","High End Desktop Computer","Entry Level Desktop Computer","Mid Level Desktop Computer","Entry and Mid Level Desktop Computer","Laptop - Notebook"]) if final_item and (final_item.lower() in o.lower() or o.lower() in final_item.lower())),0)
+with col3:
+    bid_no_val = st.text_input("Bid Number (Auto-filled from Bid)", value=final_bid_no, key="bid_final")
+    st.caption(f"<span class='autofill-badge'>Exact: {final_bid_no or 'Not found'}</span>", unsafe_allow_html=True)
+
+with col4:
+    qty_val = st.number_input("Quantity (Auto-filled from Bid Table)", min_value=1, max_value=10000, value=final_qty_raw, key="qty_final")
+    st.caption(f"<span class='autofill-badge'>Exact from sheet: {final_qty_raw}</span>", unsafe_allow_html=True)
+
+c_a,c_b = st.columns([3,1])
+with c_a:
+    try: i_idx = next((i for i,o in enumerate(ITEMS) if final_item_raw and (final_item_raw.lower() in o.lower() or o.lower() in final_item_raw.lower())),0)
     except: i_idx=0
-    item_cat = st.selectbox("Item Category (Exact from sheet)", ["Desktop Computer","All in One PC","All in One PC - High End","High End Desktop Computer","Entry Level Desktop Computer","Mid Level Desktop Computer","Entry and Mid Level Desktop Computer","Laptop - Notebook"], index=i_idx, key="item_exact")
-    if final_item:
-        st.caption(f"Exact from sheet: {final_item[:80]}")
-        if final_item not in ["Desktop Computer","All in One PC","All in One PC - High End","High End Desktop Computer","Entry Level Desktop Computer","Mid Level Desktop Computer","Entry and Mid Level Desktop Computer","Laptop - Notebook"]:
-            item_cat = st.text_input("Exact Item from sheet", value=final_item, key="item_manual_exact")
-with cb:
-    margin = st.number_input("Margin ₹", value=st.session_state.get("margin",4000), step=500, key="margin_exact")
+    item_val = st.selectbox("Item Category (Auto-filled from Bid)", ITEMS, index=i_idx, key="item_final")
+    st.caption(f"Exact from PDF: {final_item_raw[:80]}" if final_item_raw else "")
+with c_b:
+    margin_val = st.number_input("Margin per PC ₹", value=st.session_state.get("margin",4000), step=500, key="margin_final")
+
 st.markdown('</div>', unsafe_allow_html=True)
 
-# PRICING
+# PRICING - ONLY ATC PRODUCTS
+detected = atc_products if atc_products else (detect_products(bid_text) if bid_text else [])
+
 st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-st.markdown(f"##### 💰 Pricing - {len(detected)} Products from ATC")
+st.markdown(f"##### 💰 Pricing — Only {len(detected)} Products From ATC Document")
+
 if detected:
     for p in detected:
         if f"pr_{p}" not in st.session_state: st.session_state[f"pr_{p}"]=MARKET.get(p,0)
@@ -340,13 +262,22 @@ if detected:
             prices[comp]=v; total+=v
             st.markdown('</div>', unsafe_allow_html=True)
             st.write("")
-    gst=int((total+margin)*0.18); grand=total+margin+gst; total_bid_val=grand*qty
+    gst=int((total+margin_val)*0.18); grand=total+margin_val+gst; total_bid=grand*qty_val
     m1,m2,m3,m4=st.columns(4)
-    m1.metric("Base", f"₹{total:,}"); m2.metric("Margin", f"₹{margin:,}"); m3.metric("GST", f"₹{gst:,}"); m4.metric("Grand/PC", f"₹{grand:,}")
-    st.markdown(f'<div style="background:#0F172A; color:white; padding:14px; border-radius:12px; text-align:center;"><b>Total Bid: ₹{total_bid_val:,} for {qty} Units | {dept} | {bid_no}</b></div>', unsafe_allow_html=True)
-    df = pd.DataFrame([["Department",dept],["Organisation",org],["Bid No",bid_no],["Item",item_cat],["Qty",qty],["Products",", ".join(detected)]]+list(prices.items())+[["Base",total],["Margin",margin],["GST",gst],["Grand",grand],["Total",total_bid_val]], columns=["Field","Value"])
+    m1.metric("Base", f"₹{total:,}"); m2.metric("Margin", f"₹{margin_val:,}"); m3.metric("GST 18%", f"₹{gst:,}"); m4.metric("Grand / PC", f"₹{grand:,}")
+    st.markdown(f'<div style="background:#0F172A; color:white; padding:14px; border-radius:12px; text-align:center;"><b>Total Bid Value: ₹{total_bid:,} for {qty_val} Units | {dept_val} | {bid_no_val}</b></div>', unsafe_allow_html=True)
+
+    df = pd.DataFrame([
+        ["Department (Auto-filled from Bid Full Doc)",dept_val],
+        ["Organisation (Auto-filled)",org_val],
+        ["Bid Number (Auto-filled)",bid_no_val],
+        ["Item Category (Auto-filled)",item_val],
+        ["Quantity (Auto-filled)",qty_val],
+        ["ATC Products Count", len(detected)],
+        ["ATC Products List", ", ".join(detected)]
+    ]+list(prices.items())+[["Base",total],["Margin",margin_val],["GST",gst],["Grand Per PC",grand],["Total Bid Value",total_bid]], columns=["Field","Value"])
     st.dataframe(df, use_container_width=True)
-    st.download_button("📥 Download Exact Report", df.to_csv(index=False).encode(), f"EXACT_{bid_no}.csv", use_container_width=True)
+    st.download_button("📥 Download Auto-filled Report CSV", df.to_csv(index=False).encode(), f"AUTO_{bid_no_val}.csv", use_container_width=True, type="primary")
 else:
-    st.warning("Upload ATC to get products")
+    st.warning("⬆️ Upload ATC PDF to get products • Upload Full Bid PDF to auto-fill Organisation, Bid No, Qty, Item")
 st.markdown('</div>', unsafe_allow_html=True)

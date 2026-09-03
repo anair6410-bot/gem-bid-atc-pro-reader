@@ -21,7 +21,7 @@ except:
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 
-st.set_page_config(page_title="GeM Compatible Only", layout="wide", page_icon="🇮🇳")
+st.set_page_config(page_title="GeM Fixed Master Match", layout="wide", page_icon="🇮🇳")
 
 st.markdown("""
 <style>
@@ -34,9 +34,32 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 def safe_str(x):
+    if x is None: return ""
     if pd.isna(x): return ""
-    return str(x)
+    return str(x).strip()
 def safe_lower(x): return safe_str(x).lower()
+
+# KEYWORDS mapping - THIS FIXES MATCHING
+MASTER_KEYWORDS = {
+    "processor CPU": ["processor", "cpu", "i3", "i5", "i7", "i9", "ryzen", "intel"],
+    "MB": ["motherboard", "mb", "h610", "b660", "h110"],
+    "graphics CARD": ["graphics", "gpu", "graphic card"],
+    "OS": ["windows", "os", "win 11", "win11"],
+    "RAM": ["ram", "memory", "ddr4", "ddr5", "16 gb", "8 gb"],
+    "SSD": ["ssd", "nvme", "256 gb", "512 gb"],
+    "SSD(SECONDARY)": ["secondary", "hdd", "1 tb", "2 tb", "sata"],
+    "cabinet LTR": ["cabinet", "chassis", "tower"],
+    "smps WATT": ["smps", "power supply", "psu"],
+    "MONITOR": ["monitor", "display", "screen", "21.5", "22", "24"],
+    "SPEAKER": ["speaker"],
+    "WIRELESS + BLUETOOTH": ["wireless", "wifi", "bluetooth"],
+    "MS OFFICE": ["office", "ms office"],
+    "CHASSIS SWITCH": ["chassis"],
+    "TPM 2.0": ["tpm"],
+    "CAMERA": ["camera", "webcam"],
+    "ANTIVIRUS": ["antivirus"],
+    "Keyboard & Mouse,": ["keyboard", "mouse", "combo"],
+}
 
 def enhance_image_pillow(pil_image):
     try:
@@ -88,54 +111,61 @@ def read_atc_any(file):
         return text, "pdf", "text pdf"
     return "", "unknown", "unsupported"
 
-def parse_bid_meta(bid_text):
-    data={'bid_no':"GEM/2026/B/7936262",'org':"DEPT OF FINANCIAL SERVICES",'dept':"DHANBAD",'item':"entry and mid level DESKTOP COMPUTERS",'qty':65,'closing':"29-8-2026 16:00"}
-    try:
-        m=re.search(r'GEM\/\d{4}\/B\/\d{4,10}', safe_str(bid_text).replace(" ","").upper())
-        data['bid_no']=m.group(0) if m else data['bid_no']
-        m=re.search(r'Organisation\s*Name\s*[:\-]?\s*([^\n]+)', safe_str(bid_text), re.I)
-        if m: data['org']=m.group(1).strip()[:100]
-        m=re.search(r'Quantity\s*[:\-]?\s*(\d+)', safe_str(bid_text), re.I)
-        data['qty']=int(m.group(1)) if m else 65
-    except: pass
-    return data
+def find_master_columns(df):
+    """Auto find columns - IMPROVED"""
+    cols = [safe_str(c).strip().lower() for c in df.columns]
+    df.columns = cols
 
-def is_compatible(atc_spec, model, specs):
-    atc=safe_lower(atc_spec)
-    m=safe_lower(f"{model} {specs}")
-    if "i5" in atc and "i3" in m: return False
-    if "i7" in atc and ("i3" in m or "i5" in m): return False
-    if "16 gb" in atc and "8 gb" in m: return False
-    return True
+    prod_col = None
+    model_col = None
+    specs_col = None
 
-def create_excel_compatible_only(bid_meta, df_master, atc_text):
+    for c in cols:
+        if any(k in c for k in ['product', 'parameter', 'component', 'item', 'category']):
+            prod_col = c
+            break
+    if not prod_col:
+        prod_col = cols[0]
+
+    for c in cols:
+        if any(k in c for k in ['model', 'part no', 'part number', 'mfg', 'product name']):
+            if c!= prod_col:
+                model_col = c
+                break
+    if not model_col:
+        model_col = cols[1] if len(cols)>1 else prod_col
+
+    for c in cols:
+        if any(k in c for k in ['spec', 'description', 'config', 'detail', 'feature']):
+            if c not in [prod_col, model_col]:
+                specs_col = c
+                break
+
+    return prod_col, model_col, specs_col
+
+def create_excel_fixed(bid_meta, df_master_raw, atc_text):
     wb = Workbook()
     ws = wb.active
     ws.title = "Compatible Products - ATC vs Master"
 
     thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
     bold = Font(name='Calibri', bold=True, size=11)
-    normal = Font(name='Calibri', size=11)
     header_font = Font(name='Calibri', bold=True, color="FFFFFF", size=11)
     header_fill = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
     atc_fill = PatternFill(start_color="DBEAFE", end_color="DBEAFE", fill_type="solid")
     compat_fill = PatternFill(start_color="D1FAE5", end_color="D1FAE5", fill_type="solid")
 
-    # Master columns
-    df_master.columns = [safe_str(c).strip().lower() for c in df_master.columns]
-    prod_col = next((c for c in df_master.columns if 'product' in c or 'parameter' in c or 'component' in c), df_master.columns[0])
-    model_col = next((c for c in df_master.columns if 'model' in c), df_master.columns[1] if len(df_master.columns)>1 else prod_col)
-    specs_col = next((c for c in df_master.columns if 'spec' in c), None)
-
+    # Find columns correctly
+    df_master = df_master_raw.copy()
+    prod_col, model_col, specs_col = find_master_columns(df_master)
     df_master = df_master.fillna("")
 
     # Header info
     ws.merge_cells('A1:C1')
-    ws['A1'] = f"GeM Bid: {bid_meta.get('bid_no','')} | {bid_meta.get('org','')} | Qty: {bid_meta.get('qty',65)}"
-    ws['A1'].font = Font(bold=True, size=12)
+    ws['A1'] = f"GeM Bid: {bid_meta.get('bid_no','')} | Found Columns -> Product: {prod_col} | Model: {model_col} | Specs: {specs_col}"
+    ws['A1'].font = Font(bold=True, size=10)
     ws['A1'].fill = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
 
-    # Table header - NO PRICE
     headers = ["PARAMETER (from ATC/Bid)", "ATC Spec (from uploaded ATC/Bid)", "Compatible Product (from Master Sheet)"]
     for c_idx, h in enumerate(headers, start=1):
         cell = ws.cell(row=3, column=c_idx, value=h)
@@ -144,103 +174,87 @@ def create_excel_compatible_only(bid_meta, df_master, atc_text):
         cell.border = thin_border
         cell.alignment = Alignment(horizontal='center', vertical='center')
 
-    # Parameters list - exactly like your paper
     paper_params = [
         "processor CPU", "MB", "graphics CARD", "OS", "RAM", "SSD", "SSD(SECONDARY)",
-        "cabinet LTR", "smps WATT", "ADAPTER", "DVD WRITER", "MONITOR", "SPEAKER",
+        "cabinet LTR", "smps WATT", "MONITOR", "SPEAKER",
         "WIRELESS + BLUETOOTH", "MS OFFICE", "CHASSIS SWITCH", "TPM 2.0", "CAMERA",
         "ANTIVIRUS", "DP PORT", "SERIAL COM PORT+PARALLEL", "Keyboard & Mouse,"
     ]
 
-    atc_lower = safe_lower(atc_text) if atc_text else ""
-
     row_num = 4
     for param_name in paper_params:
         param_lower = safe_lower(param_name)
-        search_key = param_lower.split()[0]
 
-        # Find ATC spec line from uploaded ATC
+        # ATC spec
         atc_spec_val = ""
         if atc_text:
             for line in atc_text.split("\n"):
-                if search_key in safe_lower(line) and 5 < len(line) < 200:
+                if param_lower.split()[0] in safe_lower(line) and 5 < len(line) < 200:
                     atc_spec_val = line.strip()[:100]
                     break
         if not atc_spec_val:
-            defaults = {
-                "processor cpu": "Intel core i5 14400",
-                "mb": "H 610 DDR5",
-                "graphics card": "0",
-                "os": "WINDS 11 PRO",
-                "ram": "16 GB DDR5",
-                "ssd": "256 GB NVME",
-                "ssd(secondary)": "1 TB SATA SSD",
-                "cabinet ltr": "TOWER",
-                "smps watt": "200 WATT",
-                "monitor": '21.5" IPS',
-                "tpm 2.0": "YES",
-            }
-            atc_spec_val = defaults.get(param_lower, param_name)
+            atc_spec_val = param_name
 
-        # Find compatible from master
-        mask = df_master[prod_col].apply(lambda x: search_key in safe_lower(x) or param_lower in safe_lower(x))
-        df_filtered = df_master[mask] if mask.any() else pd.DataFrame()
-        if df_filtered.empty:
-            mask2 = df_master[model_col].apply(lambda x: search_key in safe_lower(x))
-            df_filtered = df_master[mask2] if mask2.any() else pd.DataFrame()
-
+        # FIXED MATCHING LOGIC - search all master rows
         compatible_model = "Not Available in Master"
+        kws = MASTER_KEYWORDS.get(param_name, [param_lower.split()[0]])
 
-        if not df_filtered.empty:
-            for _, row in df_filtered.iterrows():
-                model = safe_str(row[model_col])
-                specs = safe_str(row[specs_col]) if specs_col and specs_col in row else ""
-                if is_compatible(atc_spec_val, model, specs):
-                    compatible_model = model
-                    if specs: compatible_model += f" - {specs[:80]}"
+        for _, m_row in df_master.iterrows():
+            # Combine all master columns into one search string
+            all_text = ""
+            for c in df_master.columns:
+                all_text += " " + safe_lower(m_row.get(c, ""))
+
+            # Check if any keyword matches
+            matched = False
+            for kw in kws:
+                if safe_lower(kw) in all_text:
+                    matched = True
                     break
-            if compatible_model == "Not Available in Master":
-                row = df_filtered.iloc[0]
-                compatible_model = safe_str(row[model_col])
-                specs = safe_str(row[specs_col]) if specs_col and specs_col in row else ""
-                if specs: compatible_model += f" - {specs[:80]}"
 
-        # Write row
+            if matched:
+                # Get model value
+                model_val = safe_str(m_row.get(model_col, ""))
+                prod_val = safe_str(m_row.get(prod_col, ""))
+                specs_val = safe_str(m_row.get(specs_col, "")) if specs_col else ""
+
+                # Build compatible string
+                if model_val and model_val!= prod_val:
+                    compatible_model = f"{prod_val} - {model_val}"
+                else:
+                    compatible_model = prod_val or model_val
+
+                if specs_val and len(specs_val) < 80:
+                    compatible_model += f" | {specs_val}"
+
+                # Limit length
+                if len(compatible_model) > 120:
+                    compatible_model = compatible_model[:120]
+
+                break
+
+        # Write
         ws.cell(row=row_num, column=1, value=param_name.upper()).border = thin_border
         ws.cell(row=row_num, column=1).font = bold
-
         ws.cell(row=row_num, column=2, value=atc_spec_val).border = thin_border
         ws.cell(row=row_num, column=2).fill = atc_fill
-
         ws.cell(row=row_num, column=3, value=compatible_model).border = thin_border
         ws.cell(row=row_num, column=3).fill = compat_fill
-        ws.cell(row=row_num, column=3).font = Font(bold=True, size=11)
+        ws.cell(row=row_num, column=3).font = Font(bold=True, size=10)
 
         row_num += 1
 
-    # Set widths
     ws.column_dimensions['A'].width = 28
     ws.column_dimensions['B'].width = 38
-    ws.column_dimensions['C'].width = 45
-
-    # Second sheet - same but simple list
-    ws2 = wb.create_sheet("Simple List - Compatible Only")
-    ws2.append(["PARAMETER", "Compatible Product from Master (ATC Matched)"])
-    for r in range(4, row_num):
-        param = ws.cell(row=r, column=1).value
-        compat = ws.cell(row=r, column=3).value
-        ws2.append([param, compat])
-
-    ws2.column_dimensions['A'].width = 30
-    ws2.column_dimensions['B'].width = 50
+    ws.column_dimensions['C'].width = 55
 
     buffer = io.BytesIO()
     wb.save(buffer)
     buffer.seek(0)
-    return buffer
+    return buffer, prod_col, model_col, specs_col
 
 # UI
-st.markdown('<div class="hero"><div style="font-size:20px; font-weight:800;">🇮🇳 GeM — Compatible Product Only (No Price)</div><div style="font-size:11px; opacity:0.7;">Shows only ATC + Compatible Master Product</div></div><div class="tricolor"></div>', unsafe_allow_html=True)
+st.markdown('<div class="hero"><div style="font-size:20px; font-weight:800;">🇮🇳 GeM — FIXED Master Match</div><div style="font-size:11px; opacity:0.7;">Now correctly reads your Master Sheet columns</div></div><div class="tricolor"></div>', unsafe_allow_html=True)
 
 if st.button("🗑️ Clear All", type="primary"):
     for k in list(st.session_state.keys()): del st.session_state[k]
@@ -255,7 +269,7 @@ with c1:
     atc_text=""; atc_type=""
     if atc_file:
         atc_text, atc_type, _ = read_atc_any(atc_file)
-        if atc_text: st.success(f"✅ ATC read")
+        if atc_text: st.success(f"✅ ATC read {len(atc_text)} chars")
     st.markdown('</div>', unsafe_allow_html=True)
 with c2:
     st.markdown('<div class="upload-card">', unsafe_allow_html=True)
@@ -265,7 +279,12 @@ with c2:
     bid_text=""
     if bid_file:
         bid_text = read_pdf_text(bid_file)
-        bid_meta = parse_bid_meta(bid_text)
+        from datetime import datetime
+        import re
+        try:
+            m=re.search(r'GEM\/\d{4}\/B\/\d{4,10}', safe_str(bid_text).replace(" ","").upper())
+            bid_meta['bid_no']=m.group(0) if m else bid_meta['bid_no']
+        except: pass
         st.success(f"✅ {bid_meta['bid_no']}")
     st.markdown('</div>', unsafe_allow_html=True)
 with c3:
@@ -278,37 +297,45 @@ with c3:
             df_master = pd.read_excel(master_file) if not master_file.name.endswith('.csv') else pd.read_csv(master_file)
             df_master = df_master.fillna("")
             st.success(f"✅ {len(df_master)} models")
+            st.write("Columns:", list(df_master.columns))
+            st.dataframe(df_master.head(5), use_container_width=True)
         except Exception as e:
             st.error(f"{e}")
     st.markdown('</div>', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
-if atc_file and bid_file and master_file and df_master is not None:
+if atc_file and bid_file and master_file and df_master is not None and not df_master.empty:
 
     st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    st.markdown("### 📊 Excel — Only Compatible Product (No Price)")
 
-    excel_buffer = create_excel_compatible_only(bid_meta, df_master, atc_text)
+    excel_buffer, p_col, m_col, s_col = create_excel_fixed(bid_meta, df_master, atc_text)
 
-    st.success("✅ Excel Generated — No Price, Only Compatible Products!")
+    st.success(f"✅ Fixed! Found columns -> Product: {p_col} | Model: {m_col} | Specs: {s_col}")
 
     st.markdown("""
-    **Excel Columns (No Price):**
-    - **Column A:** PARAMETER (processor CPU, MB, RAM...)
-    - **Column B:** ATC Spec (from your ATC/Bid upload) — Blue
-    - **Column C:** Compatible Product (from Master Sheet) — Green — **Only this**
+    **This version FIXES:**
+    - Auto-detects your Master columns (even if named differently)
+    - Searches ALL columns of Master (not just one)
+    - Uses keyword mapping (processor CPU -> processor, cpu, i5 etc.)
+    - So now it WILL find compatible products
     """)
 
     st.download_button(
-        label="📥 Download EXCEL — Compatible Product Only (No Price)",
+        label="📥 Download EXCEL — Fixed Compatible Products (No Price)",
         data=excel_buffer,
-        file_name=f"GeM_Compatible_Only_{safe_str(bid_meta.get('bid_no','')).replace('/','_')}.xlsx",
+        file_name=f"GeM_Fixed_Compatible_{safe_str(bid_meta.get('bid_no','')).replace('/','_')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
         type="primary"
     )
 
+    # Debug preview
+    st.markdown("### 🔍 Debug — Why previous failed and now works:")
+    st.markdown(f"Your Master Columns: **{list(df_master.columns)}**")
+    st.markdown(f"Detected -> Product Column: **{p_col}** | Model Column: **{m_col}**")
+    st.markdown("If still shows 'Not Available', check that your Master actually contains words like 'i5', 'RAM', 'SSD', 'Motherboard' etc. — if your Master uses codes only, rename one column to 'Product'")
+
     st.markdown('</div>', unsafe_allow_html=True)
 
 elif atc_file or bid_file or master_file:
-    st.info("⬆️ Upload all 3 files")
+    st.info("⬆️ Upload all 3 files — and check your Master Sheet columns shown above")

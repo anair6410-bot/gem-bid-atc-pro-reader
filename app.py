@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import re
-from PIL import Image, ImageEnhance
+from PIL import Image, ImageEnhance, ImageFilter
 import io
 from datetime import datetime
 
@@ -18,16 +18,10 @@ try:
 except:
     OCR_AVAILABLE = False
 
-try:
-    import cv2, numpy as np
-    CV2_AVAILABLE = True
-except:
-    CV2_AVAILABLE = False
-
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 
-st.set_page_config(page_title="GeM Proper Excel Fixed", layout="wide", page_icon="🇮🇳")
+st.set_page_config(page_title="GeM Proper Excel", layout="wide", page_icon="🇮🇳")
 
 st.markdown("""
 <style>
@@ -51,29 +45,24 @@ KEYWORDS = {
 }
 
 def safe_str(x):
-    """FIX: Convert float NaN to string safely"""
-    if pd.isna(x):
-        return ""
+    if pd.isna(x): return ""
     return str(x)
 
 def safe_lower(x):
-    """FIX: Safe lower for float"""
     return safe_str(x).lower()
 
-def enhance_image(pil_image):
+def enhance_image_pillow(pil_image):
     try:
-        if CV2_AVAILABLE:
-            img = np.array(pil_image.convert('RGB'))
-            img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-            h, w = img.shape
-            if w < 1500: img = cv2.resize(img, (w*2, h*2), interpolation=cv2.INTER_CUBIC)
-            img = cv2.medianBlur(img, 1)
-            img = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
-            return Image.fromarray(img)
-        else:
-            img = pil_image.convert('L')
-            enhancer = ImageEnhance.Contrast(img)
-            return enhancer.enhance(2.0)
+        img = pil_image.convert('L')
+        w, h = img.size
+        if w < 1800:
+            img = img.resize((w*2, h*2), Image.LANCZOS)
+        img = img.filter(ImageFilter.MedianFilter(size=3))
+        enhancer = ImageEnhance.Contrast(img)
+        img = enhancer.enhance(2.5)
+        enhancer2 = ImageEnhance.Sharpness(img)
+        img = enhancer2.enhance(2.0)
+        return img
     except:
         return pil_image
 
@@ -89,13 +78,16 @@ def read_atc_any(file):
     filename = safe_lower(file.name)
     file.seek(0)
     if filename.endswith(('.jpg','.jpeg','.png','.bmp','.webp')):
-        if not OCR_AVAILABLE: return "", "image", "OCR missing"
-        pil_img = Image.open(file)
-        enhanced = enhance_image(pil_img)
-        text = pytesseract.image_to_string(enhanced, config=r'--oem 3 --psm 6')
-        if len(text.strip())<30:
-            text = pytesseract.image_to_string(enhanced, config=r'--oem 3 --psm 3')
-        return text, "image", "success"
+        if not OCR_AVAILABLE: return "", "image", "OCR missing - add packages.txt"
+        try:
+            pil_img = Image.open(file)
+            enhanced = enhance_image_pillow(pil_img)
+            text = pytesseract.image_to_string(enhanced, config=r'--oem 3 --psm 6')
+            if len(text.strip())<30:
+                text = pytesseract.image_to_string(enhanced, config=r'--oem 3 --psm 3')
+            return text, "image", "success"
+        except Exception as e:
+            return "", "image", f"Error {e}"
     elif filename.endswith('.pdf'):
         text = read_pdf_text(file)
         if len(text.strip())<100 and OCR_AVAILABLE:
@@ -107,11 +99,12 @@ def read_atc_any(file):
                 for page in doc:
                     pix=page.get_pixmap(dpi=300)
                     pil_img=Image.open(io.BytesIO(pix.tobytes("png")))
-                    enhanced=enhance_image(pil_img)
+                    enhanced=enhance_image_pillow(pil_img)
                     ocr_full+=pytesseract.image_to_string(enhanced, config=r'--oem 3 --psm 6')+"\n"
                 if len(ocr_full.strip())>50:
                     return ocr_full, "scanned_pdf", "OCR success"
-            except: pass
+            except Exception as e:
+                pass
         return text, "pdf", "text pdf"
     return "", "unknown", "unsupported"
 
@@ -156,10 +149,8 @@ def create_proper_excel(bid_meta, df_comp, df_other, atc_products, atc_type):
     border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
     bold = Font(bold=True)
 
-    # Sheet 1: Summary
     ws1 = wb.active
     ws1.title = "Bid Summary"
-    ws1.merge_cells('A1:E1')
     ws1['A1'] = f"GeM Bid Proposal - {safe_str(bid_meta.get('bid_no',''))}"
     ws1['A1'].font = Font(bold=True, size=14)
 
@@ -186,10 +177,8 @@ def create_proper_excel(bid_meta, df_comp, df_other, atc_products, atc_type):
             if r_idx==3 or r_idx==9:
                 cell.font = header_font
                 cell.fill = header_fill
-
     for col in ['A','B']: ws1.column_dimensions[col].width = 35
 
-    # Sheet 2: ATC Compatible
     ws2 = wb.create_sheet("ATC Compatible")
     headers = ["S.No", "Product (From ATC)", "ATC Spec", "Compatible Model", "Price (₹)", "Reason"]
     for c, h in enumerate(headers, start=1):
@@ -205,14 +194,12 @@ def create_proper_excel(bid_meta, df_comp, df_other, atc_products, atc_type):
             ws2.cell(row=r_idx, column=5, value=row.get('Price',0)).border=border
             ws2.cell(row=r_idx, column=5).number_format='₹#,##0'
             ws2.cell(row=r_idx, column=6, value=safe_str(row.get('Reason',''))).border=border
-
         total_row = len(df_comp)+2
         ws2.cell(row=total_row, column=2, value="TOTAL").font=bold; ws2.cell(row=total_row, column=2).border=border
         ws2.cell(row=total_row, column=5, value=f"=SUM(E2:E{total_row-1})").font=bold; ws2.cell(row=total_row, column=5).border=border
 
     for col, w in zip(['A','B','C','D','E','F'], [8,20,35,30,15,20]): ws2.column_dimensions[col].width=w
 
-    # Sheet 3: Other Products
     ws3 = wb.create_sheet("Other Products")
     headers3 = ["S.No", "Other Product", "Available Model", "Price (₹)", "Specs"]
     for c, h in enumerate(headers3, start=1):
@@ -230,7 +217,6 @@ def create_proper_excel(bid_meta, df_comp, df_other, atc_products, atc_type):
 
     for col, w in zip(['A','B','C','D','E'], [8,20,30,15,35]): ws3.column_dimensions[col].width=w
 
-    # Sheet 4: Final Combined
     ws4 = wb.create_sheet("Final Combined List")
     headers4 = ["Type", "Product", "Model", "Price (₹)", "Specs / ATC Spec", "Compatibility"]
     for c, h in enumerate(headers4, start=1):
@@ -248,7 +234,6 @@ def create_proper_excel(bid_meta, df_comp, df_other, atc_products, atc_type):
             ws4.cell(row=row_num, column=5, value=safe_str(r.get('ATC Spec',''))).border=border
             ws4.cell(row=row_num, column=6, value=safe_str(r.get('Compatibility',''))).border=border
             row_num+=1
-
     if not df_other.empty:
         for _, r in df_other.iterrows():
             ws4.cell(row=row_num, column=1, value="Other Product").border=border
@@ -268,7 +253,10 @@ def create_proper_excel(bid_meta, df_comp, df_other, atc_products, atc_type):
     return buffer
 
 # UI
-st.markdown('<div class="hero"><div style="font-size:20px; font-weight:800;">🇮🇳 GeM — Proper Excel Fixed ✅</div><div style="font-size:11px; opacity:0.7;">Float-safe + Proper Excel with 4 sheets</div></div><div class="tricolor"></div>', unsafe_allow_html=True)
+st.markdown('<div class="hero"><div style="font-size:20px; font-weight:800;">🇮🇳 GeM — Proper Excel Fixed ✅</div><div style="font-size:11px; opacity:0.7;">Lightweight install - No opencv error</div></div><div class="tricolor"></div>', unsafe_allow_html=True)
+
+if not OCR_AVAILABLE:
+    st.info("ℹ️ For Image ATC to work, add packages.txt. Text PDF works without it.")
 
 if st.button("🗑️ Clear All", type="primary"):
     for k in list(st.session_state.keys()): del st.session_state[k]
@@ -288,7 +276,7 @@ with c1:
             atc_products, atc_spec_map = parse_atc_components(atc_text)
             st.success(f"✅ {len(atc_products)} comps | {atc_type}")
         else:
-            st.error("❌ Could not read ATC - try clearer image or text PDF")
+            st.error("❌ Could not read ATC")
     st.markdown('</div>', unsafe_allow_html=True)
 
 with c2:
@@ -311,9 +299,8 @@ with c3:
     if master_file:
         try:
             df_master = pd.read_excel(master_file) if not master_file.name.endswith('.csv') else pd.read_csv(master_file)
-            # FIX: Clean NaN immediately
             df_master = df_master.fillna("")
-            st.success(f"✅ {len(df_master)} models loaded (NaN cleaned)")
+            st.success(f"✅ {len(df_master)} models")
             st.dataframe(df_master.head(2), use_container_width=True)
         except Exception as e:
             st.error(f"{e}")
@@ -322,7 +309,6 @@ st.markdown('</div>', unsafe_allow_html=True)
 
 if atc_file and bid_file and master_file and df_master is not None and not df_master.empty:
 
-    # FIX: Clean master fully - remove float NaN
     df_master = df_master.fillna("")
     for col in df_master.columns:
         df_master[col] = df_master[col].apply(lambda x: "" if pd.isna(x) else x)
@@ -334,7 +320,6 @@ if atc_file and bid_file and master_file and df_master is not None and not df_ma
     specs_col = next((c for c in df_master.columns if 'spec' in c), None)
 
     if len(atc_products)==0:
-        # FIX: Use safe_str
         unique_prods = [safe_str(x) for x in df_master[prod_col].unique().tolist() if safe_str(x).strip()!=""]
         atc_products = unique_prods[:15]
 
@@ -342,9 +327,7 @@ if atc_file and bid_file and master_file and df_master is not None and not df_ma
 
     for comp in atc_products:
         comp_safe = safe_str(comp)
-        if not comp_safe.strip():
-            continue
-        # FIX: Safe lower comparison
+        if not comp_safe.strip(): continue
         mask = df_master[prod_col].apply(lambda x: safe_lower(x).find(safe_lower(comp_safe).split()[0])!=-1 if safe_lower(comp_safe).split() else False)
         df_filtered = df_master[mask] if mask.any() else pd.DataFrame()
 
@@ -363,11 +346,10 @@ if atc_file and bid_file and master_file and df_master is not None and not df_ma
         found=False
         for _, row in df_filtered.iterrows():
             try:
-                model=safe_str(row[model_col]); specs=safe_str(row[specs_col]) if specs_col and specs_col in row else ""; price=row[price_col]
-                # price can be float/string - convert
+                model=safe_str(row[model_col]); specs=safe_str(row[specs_col]) if specs_col and specs_col in row else ""
+                price=row[price_col]
                 try: price_val = float(price) if price!="" else 0
                 except: price_val = price
-
                 ok,reason=is_compatible(atc_spec_map.get(comp_safe, ""),model,specs)
                 if ok:
                     fresh_rows.append({"Product": comp_safe, "ATC Spec": safe_str(atc_spec_map.get(comp_safe, "")), "Compatible Model": model, "Price": price_val, "Specs": specs, "Compatibility": "✅ Compatible", "Reason": reason})
@@ -384,7 +366,6 @@ if atc_file and bid_file and master_file and df_master is not None and not df_ma
                 fresh_rows.append({"Product": comp_safe, "ATC Spec": safe_str(atc_spec_map.get(comp_safe, "")), "Compatible Model": model, "Price": price_val, "Specs": specs, "Compatibility": "❌ Not Compatible", "Reason": "Check spec"})
             except: pass
 
-    # Other products - FIX float issue here too
     all_master_products = [safe_str(x) for x in df_master[prod_col].unique().tolist() if safe_str(x).strip()!=""]
     atc_lower = [safe_lower(p) for p in atc_products]
 
@@ -394,7 +375,6 @@ if atc_file and bid_file and master_file and df_master is not None and not df_ma
             df_other_temp = df_master[df_master[prod_col].apply(lambda x: safe_str(x)==prod)]
             if not df_other_temp.empty:
                 try:
-                    # Sort by price - handle non-numeric
                     df_other_temp[price_col] = pd.to_numeric(df_other_temp[price_col], errors='coerce').fillna(0)
                     df_other_sorted = df_other_temp.sort_values(by=price_col, ascending=True)
                     row=df_other_sorted.iloc[0]
@@ -408,7 +388,6 @@ if atc_file and bid_file and master_file and df_master is not None and not df_ma
     df_comp = df_fresh[df_fresh["Compatibility"]=="✅ Compatible"] if "Compatibility" in df_fresh.columns and not df_fresh.empty else pd.DataFrame()
 
     st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-
     tab1,tab2,tab3 = st.tabs(["✅ ATC Compatible", "📦 Other Products", "📊 Proper Excel Download"])
 
     with tab1:
@@ -420,11 +399,9 @@ if atc_file and bid_file and master_file and df_master is not None and not df_ma
         else: st.info("No other products")
 
     with tab3:
-        st.markdown("### 📊 Proper Excel File — 4 Sheets Formatted")
-
         if not df_comp.empty or not df_other.empty:
             excel_buffer = create_proper_excel(bid_meta, df_comp, df_other, atc_products, atc_type)
-            st.success("✅ Proper Excel Generated — Float-safe!")
+            st.success("✅ Proper Excel Generated!")
 
             st.download_button(
                 label="📥 Download PROPER EXCEL FILE (4 Sheets, Formatted)",
@@ -435,7 +412,7 @@ if atc_file and bid_file and master_file and df_master is not None and not df_ma
                 type="primary"
             )
         else:
-            st.warning("No data to generate Excel")
+            st.warning("No data")
 
     st.markdown('</div>', unsafe_allow_html=True)
 

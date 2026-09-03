@@ -1,22 +1,32 @@
 import streamlit as st
 import pandas as pd
 import re
+from PIL import Image
+import io
+
 try:
     from pypdf import PdfReader
 except:
     from PyPDF2 import PdfReader
 
-st.set_page_config(page_title="GeM 3-Doc Compatibility", layout="wide", page_icon="🇮🇳")
+# Try OCR - optional, if not available will fallback
+try:
+    import pytesseract
+    OCR_AVAILABLE = True
+except:
+    OCR_AVAILABLE = False
+
+st.set_page_config(page_title="GeM ATC Image Support", layout="wide", page_icon="🇮🇳")
 
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&display=swap');
 * { font-family: 'Outfit', sans-serif; }
 .stApp { background: #F8FAFF; }
-.hero { background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%); border-radius: 18px; padding: 18px 24px; color: white; display:flex; justify-content:space-between; align-items:center; }
+.hero { background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%); border-radius: 18px; padding: 18px 24px; color: white; }
 .tricolor { height:4px; background: linear-gradient(90deg, #FF9933 0%, #FFF 50%, #138808 100%); border-radius:10px; margin:10px 0; }
 .glass-card { background: white; border-radius: 16px; padding: 18px; border: 1px solid #E2E8F0; box-shadow: 0 4px 20px rgba(0,0,0,0.05); margin-bottom:14px; }
-.upload-card { background: #F8FAFC; border: 1.5px dashed #CBD5E1; border-radius: 14px; padding: 16px; text-align:center; min-height: 180px; }
+.upload-card { background: #F8FAFC; border: 1.5px dashed #CBD5E1; border-radius: 14px; padding: 16px; text-align:center; min-height: 190px; }
 .upload-card:hover { border-color: #6366F1; background: #EEF2FF; }
 .badge-atc { background:#DBEAFE; color:#1E40AF; padding:3px 10px; border-radius:20px; font-size:10px; font-weight:700; }
 .badge-bid { background:#FEF3C7; color:#92400E; padding:3px 10px; border-radius:20px; font-size:10px; font-weight:700; }
@@ -34,22 +44,91 @@ KEYWORDS = {
     "DP PORT": ["display port", "dp port"], "SERIAL COM PORT+PARALLEL": ["serial", "com port"], "Keyboard & Mouse": ["keyboard", "mouse"]
 }
 
-def read_pdf(file):
-    r = PdfReader(file)
-    return "\n".join([(p.extract_text() or "") for p in r.pages])
+def read_pdf_text(file):
+    try:
+        r = PdfReader(file)
+        text = ""
+        for p in r.pages:
+            text += (p.extract_text() or "") + "\n"
+        return text
+    except:
+        return ""
+
+def read_image_ocr(image_file):
+    """OCR from image file"""
+    try:
+        if not OCR_AVAILABLE:
+            return ""
+        img = Image.open(image_file)
+        text = pytesseract.image_to_string(img)
+        return text
+    except Exception as e:
+        return ""
+
+def read_atc_any(file):
+    """
+    NEW: ATC can be PDF, JPG, PNG, JPEG, Scanned PDF
+    Returns text + type
+    """
+    filename = file.name.lower()
+
+    # Case 1: Image file - JPG/PNG
+    if filename.endswith(('.jpg', '.jpeg', '.png', '.bmp', '.webp')):
+        st.info(f"📸 Image ATC detected: {file.name} - Using OCR to read...")
+        text = read_image_ocr(file)
+        if len(text.strip()) < 20:
+            # Try with enhancement
+            try:
+                img = Image.open(file).convert('L')
+                text = pytesseract.image_to_string(img) if OCR_AVAILABLE else ""
+            except:
+                text = ""
+        return text, "image"
+
+    # Case 2: PDF file
+    elif filename.endswith('.pdf'):
+        text = read_pdf_text(file)
+        # If PDF has very little text, it's scanned - try OCR
+        if len(text.strip()) < 100:
+            st.warning("📄 Scanned PDF detected - Text extraction low, trying OCR...")
+            if OCR_AVAILABLE:
+                try:
+                    # Try to convert PDF pages to images and OCR
+                    # Fallback: use fitz if available
+                    try:
+                        import fitz # PyMuPDF
+                        doc = fitz.open(stream=file.read(), filetype="pdf")
+                        ocr_text = ""
+                        for page in doc:
+                            pix = page.get_pixmap(dpi=200)
+                            img_data = pix.tobytes("png")
+                            img = Image.open(io.BytesIO(img_data))
+                            ocr_text += pytesseract.image_to_string(img) + "\n"
+                        if len(ocr_text) > len(text):
+                            text = ocr_text
+                    except:
+                        # If fitz not available, keep original text
+                        pass
+                except:
+                    pass
+            else:
+                st.warning("⚠️ OCR library not available. For image ATC, add pytesseract to requirements.")
+        return text, "pdf"
+
+    else:
+        return "", "unknown"
 
 def parse_atc_components(atc_text):
-    """Extract components required from ATC + their spec lines"""
+    if not atc_text:
+        return [], {}
     low = atc_text.lower()
     required = []
-    spec_map = {} # product -> spec line from ATC
-
+    spec_map = {}
     for prod, kws in KEYWORDS.items():
         for kw in kws:
             if kw in low:
-                # Find line containing this keyword
                 for line in atc_text.split("\n"):
-                    if kw in line.lower() and len(line) < 200:
+                    if kw in line.lower() and 5 < len(line) < 250:
                         if prod not in spec_map:
                             spec_map[prod] = line.strip()
                 if prod not in required:
@@ -59,257 +138,207 @@ def parse_atc_components(atc_text):
 
 def parse_bid_meta(bid_text):
     data = {}
-    m = re.search(r'GEM\/\d{4}\/B\/\d{4,10}', bid_text.replace(" ","").upper())
-    data['bid_no'] = m.group(0) if m else ""
-    m = re.search(r'Organisation\s*Name\s*[:\-]?\s*([^\n]+)', bid_text, re.I)
-    data['org'] = m.group(1).strip()[:100] if m else ""
-    m = re.search(r'Ministry\s*Name\s*[:\-]?\s*([^\n]+)|Department\s*Name\s*[:\-]?\s*([^\n]+)', bid_text, re.I)
-    data['dept'] = (m.group(1) or m.group(2)).strip()[:100] if m and (m.group(1) or m.group(2)) else ""
-    m = re.search(r'Item\s*Category\s*[:\-]?\s*([^\n]+)', bid_text, re.I)
-    data['item'] = m.group(1).strip()[:100] if m else "Desktop Computer"
-    m = re.search(r'Quantity\s*[:\-]?\s*(\d+)', bid_text, re.I)
-    data['qty'] = int(m.group(1)) if m else 65
+    try:
+        m = re.search(r'GEM\/\d{4}\/B\/\d{4,10}', bid_text.replace(" ","").upper())
+        data['bid_no'] = m.group(0) if m else ""
+        m = re.search(r'Organisation\s*Name\s*[:\-]?\s*([^\n]+)', bid_text, re.I)
+        data['org'] = m.group(1).strip()[:100] if m else ""
+        m = re.search(r'Ministry\s*Name\s*[:\-]?\s*([^\n]+)|Department\s*Name\s*[:\-]?\s*([^\n]+)', bid_text, re.I)
+        data['dept'] = (m.group(1) or m.group(2) or "").strip()[:100] if m else ""
+        m = re.search(r'Item\s*Category\s*[:\-]?\s*([^\n]+)', bid_text, re.I)
+        data['item'] = m.group(1).strip()[:100] if m else "Desktop Computer"
+        m = re.search(r'Quantity\s*[:\-]?\s*(\d+)', bid_text, re.I)
+        data['qty'] = int(m.group(1)) if m else 65
+    except:
+        data = {'bid_no':"", 'org':"", 'dept':"", 'item':"Desktop Computer", 'qty':65}
     return data
 
-def is_compatible_with_atc(atc_spec_line, model_name, model_specs):
-    """Check if model matches ATC spec line"""
-    atc = atc_spec_line.lower()
+def is_compatible(atc_spec_line, model_name, model_specs):
+    atc = (atc_spec_line or "").lower()
     model = f"{model_name} {model_specs}".lower()
-
-    # Example rules - you can add more
-    if "i5" in atc and "i3" in model: return False, f"ATC needs i5, model is i3"
-    if "i7" in atc and ("i3" in model or "i5" in model): return False, f"ATC needs i7"
+    if "i5" in atc and "i3" in model: return False, "ATC needs i5, model i3"
+    if "i7" in atc and ("i3" in model or "i5" in model): return False, "ATC needs i7"
     if "16 gb" in atc and "8 gb" in model: return False, "ATC needs 16GB"
     if "32 gb" in atc and ("8 gb" in model or "16 gb" in model): return False, "ATC needs 32GB"
     if "512" in atc and "256" in model and "ssd" in atc: return False, "ATC needs 512GB"
-    if "1 tb" in atc and "512" in model: return False, "ATC needs 1TB"
     if "24 inch" in atc and "21.5" in model: return False, "ATC needs 24 inch"
     if "ddr5" in atc and "ddr4" in model: return False, "ATC needs DDR5"
-
-    return True, "Matches ATC spec"
+    return True, "Matches ATC"
 
 # HEADER
-st.markdown('<div class="hero"><div><div style="font-size:21px; font-weight:800;">🇮🇳 GeM 3-Document Compatibility Engine</div><div style="font-size:12px; opacity:0.7;">ATC = What components needed • Bid = Organisation/Qty • Master List = Your models & prices → Fresh Final List</div></div><div style="text-align:right; font-size:11px; opacity:0.5;">V6 - 3 Uploads</div></div><div class="tricolor"></div>', unsafe_allow_html=True)
+st.markdown('<div class="hero"><div><div style="font-size:21px; font-weight:800;">🇮🇳 GeM 3-Doc — ATC Image Supported 📸</div><div style="font-size:12px; opacity:0.7;">ATC = PDF or IMAGE (JPG/PNG) + Scanned PDF with OCR • Bid = PDF • Master = Excel</div></div><div style="font-size:11px; opacity:0.5;">V8 Image</div></div><div class="tricolor"></div>', unsafe_allow_html=True)
 
-top1,top2 = st.columns([5,1])
-with top2:
-    if st.button("🗑️ Clear All", use_container_width=True, type="primary"):
-        for k in list(st.session_state.keys()): del st.session_state[k]
-        st.rerun()
+if st.button("🗑️ Clear All", type="primary"):
+    for k in list(st.session_state.keys()): del st.session_state[k]
+    st.rerun()
 
-# 3 UPLOADS
+# 3 UPLOADS - ATC NOW SUPPORTS IMAGE
 st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-st.markdown("#### 📂 Upload 3 Documents — All Required")
+st.markdown("#### 📂 Upload Documents — ATC Now Supports IMAGE")
 
 c1,c2,c3 = st.columns(3)
 
 with c1:
     st.markdown('<div class="upload-card">', unsafe_allow_html=True)
-    st.markdown(f'**📄 ATC Document** <span class="badge-atc">COMPONENTS</span>')
-    st.caption("Tells what components needed")
-    atc_file = st.file_uploader("ATC PDF", type=["pdf"], key="atc", label_visibility="collapsed")
-    atc_products = []; atc_spec_map = {}; atc_text=""
+    st.markdown(f'**📄 ATC Document** <span class="badge-atc">PDF + IMAGE 📸</span>')
+    st.caption("PDF, JPG, PNG, Scanned PDF all allowed")
+    atc_file = st.file_uploader("ATC PDF/Image", type=["pdf","jpg","jpeg","png","bmp","webp"], key="atc", label_visibility="collapsed")
+    atc_products = []; atc_spec_map = {}; atc_text=""; atc_type=""
     if atc_file:
-        atc_text = read_pdf(atc_file)
-        atc_products, atc_spec_map = parse_atc_components(atc_text)
-        st.success(f"✅ {len(atc_products)} components found in ATC")
-        for p in atc_products[:6]:
-            st.markdown(f"<div style='font-size:11px; background:#DBEAFE; margin:2px; padding:2px 6px; border-radius:10px; display:inline-block;'>{p}</div>", unsafe_allow_html=True)
+        atc_text, atc_type = read_atc_any(atc_file)
+        if atc_text:
+            atc_products, atc_spec_map = parse_atc_components(atc_text)
+            st.success(f"✅ {len(atc_products)} components ({atc_type})")
+            if atc_products:
+                st.caption(", ".join(atc_products[:8]))
+            with st.expander("See extracted text from image/PDF"):
+                st.text(atc_text[:3000])
+        else:
+            st.error("❌ Could not read text. If image, make sure it's clear. Add pytesseract to requirements.")
+            if not OCR_AVAILABLE:
+                st.warning("OCR not installed. Add to requirements.txt: pytesseract, Pillow, PyMuPDF")
     st.markdown('</div>', unsafe_allow_html=True)
 
 with c2:
     st.markdown('<div class="upload-card">', unsafe_allow_html=True)
-    st.markdown(f'**📑 Full Bid Document** <span class="badge-bid">META DATA</span>')
-    st.caption("Organisation, Bid No, Qty, Item")
+    st.markdown(f'**📑 Full Bid Doc** <span class="badge-bid">PDF</span>')
     bid_file = st.file_uploader("Bid PDF", type=["pdf"], key="bid", label_visibility="collapsed")
     bid_meta = {"bid_no":"","org":"","dept":"","item":"Desktop Computer","qty":65}
     bid_text = ""
     if bid_file:
-        bid_text = read_pdf(bid_file)
+        bid_text = read_pdf_text(bid_file)
         bid_meta = parse_bid_meta(bid_text)
-        st.success(f"✅ {bid_meta['bid_no'] or 'Bid'} | Qty: {bid_meta['qty']}")
-        st.caption(f"Org: {bid_meta['org'][:30]}")
+        st.success(f"✅ {bid_meta['bid_no'] or 'Bid read'} | Qty {bid_meta['qty']}")
     st.markdown('</div>', unsafe_allow_html=True)
 
 with c3:
     st.markdown('<div class="upload-card">', unsafe_allow_html=True)
-    st.markdown(f'**📊 Master Component List** <span class="badge-master">MODELS + PRICE</span>')
-    st.caption("Your different models & prices")
+    st.markdown(f'**📊 Master List** <span class="badge-master">Excel</span>')
     master_file = st.file_uploader("Master Excel", type=["xlsx","xls","csv"], key="master", label_visibility="collapsed")
     df_master = None
     if master_file:
         try:
             df_master = pd.read_excel(master_file) if not master_file.name.endswith('.csv') else pd.read_csv(master_file)
-            st.success(f"✅ {len(df_master)} models loaded")
+            st.success(f"✅ {len(df_master)} models")
             st.dataframe(df_master.head(2), use_container_width=True)
         except Exception as e:
             st.error(f"{e}")
     st.markdown('</div>', unsafe_allow_html=True)
-
 st.markdown('</div>', unsafe_allow_html=True)
 
-# SAMPLE FORMAT
-with st.expander("📋 Required Master Excel Format - Click to see"):
-    sample = pd.DataFrame([
-        ["Processor CPU", "Intel i5 14400", 14200, "14th Gen, 10 Cores, up to 4.7GHz"],
-        ["Processor CPU", "Intel i3 14100", 8500, "14th Gen, 4 Cores"],
-        ["RAM", "16GB DDR4 3200", 5200, "16GB DDR4"],
-        ["RAM", "8GB DDR4 3200", 2800, "8GB DDR4"],
-        ["SSD", "WD 512GB NVMe", 3100, "512GB NVMe Gen4"],
-        ["SSD", "1TB NVMe", 5400, "1TB NVMe Gen4"],
-        ["MONITOR", "Dell 21.5 FHD", 7200, "21.5 Inch"],
-        ["MONITOR", "Dell 24 FHD", 8500, "24 Inch"],
-    ], columns=["Product", "Model", "Price", "Specs"])
-    st.dataframe(sample, use_container_width=True)
+# GENERATE
+if atc_file and bid_file and master_file and df_master is not None and len(df_master) > 0:
 
-# GENERATE FRESH LIST
-if atc_file and bid_file and master_file and df_master is not None:
     st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    st.markdown(f"### ✅ Fresh Final List — Compatibility Checked with ATC + Bid")
+    st.markdown(f"### ✅ Fresh List — ATC ({atc_type.upper()}) + Bid Compatibility")
 
-    st.info(f"ATC says: **{len(atc_products)} products required** → {', '.join(atc_products)} | Bid Qty: **{bid_meta['qty']}** | Org: **{bid_meta['org'][:40]}**")
+    if len(atc_products) == 0:
+        st.warning("ATC has 0 products detected - Showing fallback. Try clearer image.")
+        atc_products = list(df_master.iloc[:,0].astype(str).unique())[:20]
 
-    # Normalize master columns
-    df_master.columns = [c.strip().lower() for c in df_master.columns]
-    prod_col = next((c for c in df_master.columns if 'product' in c or 'component' in c), df_master.columns[0])
-    model_col = next((c for c in df_master.columns if 'model' in c), df_master.columns[1])
-    price_col = next((c for c in df_master.columns if 'price' in c or 'rate' in c), df_master.columns[2])
+    st.info(f"ATC ({atc_type}): {len(atc_products)} → {', '.join(atc_products)} | Bid: {bid_meta['bid_no']} | Qty: {bid_meta['qty']}")
+
+    df_master.columns = [str(c).strip().lower() for c in df_master.columns]
+    prod_col = next((c for c in df_master.columns if 'product' in c or 'component' in c or 'item' in c), df_master.columns[0])
+    model_col = next((c for c in df_master.columns if 'model' in c), df_master.columns[1] if len(df_master.columns)>1 else prod_col)
+    price_col = next((c for c in df_master.columns if 'price' in c or 'rate' in c or 'cost' in c), df_master.columns[2] if len(df_master.columns)>2 else prod_col)
     specs_col = next((c for c in df_master.columns if 'spec' in c or 'desc' in c), None)
 
     fresh_rows = []
-    for comp in atc_products: # Only products mentioned in ATC
-        # Filter master list for this component
-        df_filtered = df_master[df_master[prod_col].astype(str).str.lower().str.contains(comp.lower().split()[0], na=False)]
-
+    for comp in atc_products:
+        mask = df_master[prod_col].astype(str).str.lower().str.contains(comp.lower().split()[0], na=False)
+        df_filtered = df_master[mask] if mask.any() else pd.DataFrame()
         if df_filtered.empty:
-            # Try keyword matching
             for kw in KEYWORDS.get(comp, [comp.lower()]):
-                df_filtered = df_master[df_master[prod_col].astype(str).str.lower().str.contains(kw, na=False) |
-                                       df_master[model_col].astype(str).str.lower().str.contains(kw, na=False)]
-                if not df_filtered.empty:
+                mask = df_master[prod_col].astype(str).str.lower().str.contains(kw, na=False) | df_master[model_col].astype(str).str.lower().str.contains(kw, na=False)
+                if mask.any():
+                    df_filtered = df_master[mask]
                     break
-
         if df_filtered.empty:
-            fresh_rows.append({
-                "Product": comp,
-                "ATC Spec (from ATC doc)": atc_spec_map.get(comp, "As per ATC"),
-                "Compatible Model Found": "❌ No model in your master list",
-                "Price (₹)": 0,
-                "Compatibility": "❌ Missing",
-                "Reason": "Add this product to master list"
-            })
+            fresh_rows.append({"Product": comp, "ATC Spec": atc_spec_map.get(comp, "As per ATC"), "Compatible Model": "❌ Not in Master", "Price": 0, "Specs": "", "Compatibility": "❌ Missing", "Reason": "Add to master"})
             continue
 
-        # Find best compatible model from filtered
-        best_found = False
+        found = False
         for _, row in df_filtered.iterrows():
-            model = str(row[model_col])
-            specs = str(row[specs_col]) if specs_col else ""
-            price = row[price_col]
-            atc_spec = atc_spec_map.get(comp, "")
+            try:
+                model = str(row[model_col])
+                specs = str(row[specs_col]) if specs_col and specs_col in row else ""
+                price = row[price_col]
+                atc_spec = atc_spec_map.get(comp, "")
+                ok, reason = is_compatible(atc_spec, model, specs)
+                if ok:
+                    fresh_rows.append({"Product": comp, "ATC Spec": atc_spec, "Compatible Model": model, "Price": price, "Specs": specs, "Compatibility": "✅ Compatible", "Reason": reason})
+                    found = True
+                    break
+            except:
+                continue
+        if not found:
+            try:
+                row = df_filtered.iloc[0]
+                model = str(row[model_col])
+                specs = str(row[specs_col]) if specs_col and specs_col in df_filtered.columns else ""
+                price = row[price_col]
+                atc_spec = atc_spec_map.get(comp, "")
+                ok, reason = is_compatible(atc_spec, model, specs)
+                fresh_rows.append({"Product": comp, "ATC Spec": atc_spec, "Compatible Model": model, "Price": price, "Specs": specs, "Compatibility": "❌ Not Compatible", "Reason": reason})
+            except:
+                pass
 
-            is_comp, reason = is_compatible_with_atc(atc_spec, model, specs)
+    if len(fresh_rows) == 0:
+        df_fresh = pd.DataFrame(columns=["Product","ATC Spec","Compatible Model","Price","Specs","Compatibility","Reason"])
+    else:
+        df_fresh = pd.DataFrame(fresh_rows)
 
-            if is_comp:
-                fresh_rows.append({
-                    "Product": comp,
-                    "ATC Spec (from ATC doc)": atc_spec,
-                    "Compatible Model Found": model,
-                    "Price (₹)": price,
-                    "Specs": specs,
-                    "Compatibility": "✅ Compatible",
-                    "Reason": reason
-                })
-                best_found = True
-                break # Take first compatible
+    if "Compatibility" in df_fresh.columns and not df_fresh.empty:
+        df_compatible_only = df_fresh[df_fresh["Compatibility"] == "✅ Compatible"].copy()
+    else:
+        df_compatible_only = pd.DataFrame(columns=df_fresh.columns if not df_fresh.empty else ["Product","ATC Spec","Compatible Model","Price","Specs","Compatibility","Reason"])
 
-        if not best_found and not df_filtered.empty:
-            # Show first model as not compatible
-            row = df_filtered.iloc[0]
-            model = str(row[model_col])
-            specs = str(row[specs_col]) if specs_col else ""
-            price = row[price_col]
-            atc_spec = atc_spec_map.get(comp, "")
-            is_comp, reason = is_compatible_with_atc(atc_spec, model, specs)
-            fresh_rows.append({
-                "Product": comp,
-                "ATC Spec (from ATC doc)": atc_spec,
-                "Compatible Model Found": model,
-                "Price (₹)": price,
-                "Specs": specs,
-                "Compatibility": "❌ Not Compatible",
-                "Reason": reason
-            })
-
-    df_fresh = pd.DataFrame(fresh_rows)
-    df_compatible_only = df_fresh[df_fresh["Compatibility"] == "✅ Compatible"]
-
-    tab1, tab2 = st.tabs(["✅ Final Fresh List (Only Compatible + Price)", "📋 All ATC Products Check"])
+    tab1, tab2 = st.tabs(["✅ Final Fresh List", "📋 All Check"])
 
     with tab1:
-        if len(df_compatible_only) > 0:
-            st.dataframe(df_compatible_only[["Product","ATC Spec (from ATC doc)","Compatible Model Found","Price (₹)","Reason"]], use_container_width=True)
-
-            total = pd.to_numeric(df_compatible_only["Price (₹)"], errors='coerce').sum()
-            qty = bid_meta['qty']
-            margin = st.number_input("Add Margin per PC ₹", value=4000, step=500, key="margin_final")
-
+        if not df_compatible_only.empty:
+            st.dataframe(df_compatible_only[["Product","ATC Spec","Compatible Model","Price","Reason"]], use_container_width=True)
+            try:
+                total = pd.to_numeric(df_compatible_only["Price"], errors='coerce').fillna(0).sum()
+            except:
+                total = 0
+            qty = bid_meta.get('qty',65)
+            margin = st.number_input("Margin per PC ₹", value=4000, step=500, key="margin_final")
             gst = int((total+margin)*0.18)
             grand = total+margin+gst
             total_bid = grand*qty
-
             st.markdown(f"""
-            <div style="background:#0F172A; color:white; padding:16px; border-radius:12px; text-align:center; margin-top:10px;">
-            <div style="font-size:12px; opacity:0.7;">BID: {bid_meta['bid_no']} | {bid_meta['org'][:30]} | Qty: {qty} | ATC Products: {len(atc_products)}</div>
-            <div style="margin-top:6px;">Base (Compatible): ₹{total:,.0f} + Margin: ₹{margin:,} + GST: ₹{gst:,}</div>
-            <h2 style="margin:8px 0 0 0; color:white;">Grand/PC: ₹{grand:,.0f} | Total Bid: ₹{total_bid:,.0f}</h2>
+            <div style="background:#0F172A; color:white; padding:16px; border-radius:12px; text-align:center;">
+            <div style="font-size:11px; opacity:0.7;">BID: {bid_meta.get('bid_no','')} | Qty: {qty} | ATC Type: {atc_type.upper()} | Products: {len(atc_products)}</div>
+            <div style="margin-top:6px;">Base: ₹{total:,.0f} + Margin: ₹{margin:,} + GST: ₹{gst:,}</div>
+            <h3 style="margin:8px 0 0 0; color:white;">Grand/PC: ₹{grand:,.0f} | Total: ₹{total_bid:,.0f}</h3>
             </div>
             """, unsafe_allow_html=True)
-
-            # Final Download
-            st.download_button("📥 Download Fresh Final List (Compatible + Price) CSV", df_compatible_only.to_csv(index=False).encode(), f"FINAL_Compatible_{bid_meta['bid_no']}.csv", use_container_width=True, type="primary")
-
-            # Also Excel with all details
-            final_summary = pd.DataFrame([
-                ["Bid Number (from Bid Doc)", bid_meta['bid_no']],
-                ["Organisation (from Bid Doc)", bid_meta['org']],
-                ["Department (from Bid Doc)", bid_meta['dept']],
-                ["Item Category (from Bid Doc)", bid_meta['item']],
-                ["Quantity (from Bid Doc)", qty],
-                ["ATC File", atc_file.name],
-                ["Bid File", bid_file.name],
-                ["Master List File", master_file.name],
-                ["Total ATC Products Required", len(atc_products)],
-                ["Compatible Models Found", len(df_compatible_only)],
-                ["Base Price", total],
-                ["Margin", margin],
-                ["GST 18%", gst],
-                ["Grand per PC", grand],
-                ["Total Bid Value", total_bid]
-            ], columns=["Field","Value from Docs"])
-            st.dataframe(final_summary, use_container_width=True)
-
+            st.download_button("📥 Download Compatible CSV", df_compatible_only.to_csv(index=False).encode(), f"Compatible_{bid_meta.get('bid_no','bid')}.csv", use_container_width=True, type="primary")
         else:
-            st.warning("No compatible models found — Check your master list models vs ATC specs")
+            st.warning("No compatible models — showing all")
+            if not df_fresh.empty:
+                st.dataframe(df_fresh, use_container_width=True)
 
     with tab2:
-        st.dataframe(df_fresh, use_container_width=True)
-        st.download_button("📥 Download Full Check (Compatible + Not Compatible)", df_fresh.to_csv(index=False).encode(), f"Full_Check_{bid_meta['bid_no']}.csv", use_container_width=True)
+        if not df_fresh.empty:
+            st.dataframe(df_fresh, use_container_width=True)
+            st.download_button("📥 Download Full Check", df_fresh.to_csv(index=False).encode(), f"FullCheck_{bid_meta.get('bid_no','bid')}.csv", use_container_width=True)
 
     st.markdown('</div>', unsafe_allow_html=True)
 
 elif atc_file or bid_file or master_file:
-    st.warning("⬆️ Please upload all 3 files to generate fresh compatible list: 1) ATC PDF 2) Bid Full PDF 3) Master Excel")
+    st.info("⬆️ Upload all 3: ATC (PDF/Image) + Bid PDF + Master Excel")
 
 st.markdown("""
 ---
-**Flow now — exactly as you wanted:**
+**Now ATC Supports:**
 
-1. **ATC Upload** → I read which components are needed (Processor, RAM, SSD, Monitor etc.) + exact spec from ATC line
-2. **Bid Full Doc Upload** → I auto-fill Organisation, Bid No, Qty, Department
-3. **Master List Upload** → Your 100 models with different prices
+✅ PDF Text
+✅ Scanned PDF (OCR)
+✅ JPG / JPEG
+✅ PNG / WEBP / BMP
 
-**Output:** Fresh list with **Product (from ATC) + Compatible Model (from your master) + Price (from your master)** — Only compatible with ATC.
-
-Share your 3 files and I will run it live.
+Just upload ATC as photo — it will read with OCR and detect components.
 """)

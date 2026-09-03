@@ -21,7 +21,7 @@ except:
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 
-st.set_page_config(page_title="GeM Paper + Compatible", layout="wide", page_icon="🇮🇳")
+st.set_page_config(page_title="GeM Compatible Only", layout="wide", page_icon="🇮🇳")
 
 st.markdown("""
 <style>
@@ -106,137 +106,70 @@ def is_compatible(atc_spec, model, specs):
     if "i5" in atc and "i3" in m: return False
     if "i7" in atc and ("i3" in m or "i5" in m): return False
     if "16 gb" in atc and "8 gb" in m: return False
-    if "512" in atc and "256" in m: return False
     return True
 
-def create_paper_format_excel(bid_meta, df_master, atc_text, bid_text):
-    """Paper Format + Compatible Product Column from Master"""
+def create_excel_compatible_only(bid_meta, df_master, atc_text):
     wb = Workbook()
     ws = wb.active
-    ws.title = "Paper Format - Cost Sheet"
+    ws.title = "Compatible Products - ATC vs Master"
 
     thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
     bold = Font(name='Calibri', bold=True, size=11)
     normal = Font(name='Calibri', size=11)
-    header_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
-    compat_fill = PatternFill(start_color="D1FAE5", end_color="D1FAE5", fill_type="solid") # Green for compatible
-    atc_fill = PatternFill(start_color="DBEAFE", end_color="DBEAFE", fill_type="solid") # Blue for ATC
+    header_font = Font(name='Calibri', bold=True, color="FFFFFF", size=11)
+    header_fill = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
+    atc_fill = PatternFill(start_color="DBEAFE", end_color="DBEAFE", fill_type="solid")
+    compat_fill = PatternFill(start_color="D1FAE5", end_color="D1FAE5", fill_type="solid")
 
-    # Parse ATC components for compatibility check
-    atc_lower = safe_lower(atc_text) if atc_text else ""
-
-    # Prepare master lookup
+    # Master columns
     df_master.columns = [safe_str(c).strip().lower() for c in df_master.columns]
-    prod_col = next((c for c in df_master.columns if 'product' in c or 'component' in c or 'parameter' in c), df_master.columns[0])
+    prod_col = next((c for c in df_master.columns if 'product' in c or 'parameter' in c or 'component' in c), df_master.columns[0])
     model_col = next((c for c in df_master.columns if 'model' in c), df_master.columns[1] if len(df_master.columns)>1 else prod_col)
-    price_col = next((c for c in df_master.columns if 'price' in c or 'rate' in c), df_master.columns[2] if len(df_master.columns)>2 else prod_col)
     specs_col = next((c for c in df_master.columns if 'spec' in c), None)
 
     df_master = df_master.fillna("")
 
-    # Define paper parameters exactly as your photo
+    # Header info
+    ws.merge_cells('A1:C1')
+    ws['A1'] = f"GeM Bid: {bid_meta.get('bid_no','')} | {bid_meta.get('org','')} | Qty: {bid_meta.get('qty',65)}"
+    ws['A1'].font = Font(bold=True, size=12)
+    ws['A1'].fill = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
+
+    # Table header - NO PRICE
+    headers = ["PARAMETER (from ATC/Bid)", "ATC Spec (from uploaded ATC/Bid)", "Compatible Product (from Master Sheet)"]
+    for c_idx, h in enumerate(headers, start=1):
+        cell = ws.cell(row=3, column=c_idx, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.border = thin_border
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+
+    # Parameters list - exactly like your paper
     paper_params = [
-        ("DEPARTMENT NAME", "DEPT OF FINANCIAL SERVICES", "entry and mid level DESKTOP COMPUTERS", "", "65"),
-        ("GEM BID NO.", "GEM/2026/B/7936262", "", "DHANBAD", ""),
-        ("Bid Closing Date/Time", "29-8-2026 16:00", "12:00 AM", "", ""),
-        ("PARAMETER", "ATC Spec (from ATC/Bid)", "Compatible Product (from Master)", "price", "Amount (₹)"),
-        ("processor CPU", "", "", "", ""),
-        ("MB", "", "", "DDR5", ""),
-        ("graphics CARD", "", "", "", ""),
-        ("OS", "", "", "", ""),
-        ("RAM", "", "", "", ""),
-        ("SSD", "", "", "", ""),
-        ("SSD(SECONDARY)", "", "", "", ""),
-        ("cabinet LTR", "", "", "", ""),
-        ("smps WATT", "", "", "", ""),
-        ("ADAPTER", "", "", "", ""),
-        ("DVD WRITER", "", "", "", ""),
-        ("MONITOR", "", "", "IPS", ""),
-        ("SPEAKER", "", "", "", ""),
-        ("WIRELESS + BLUETOOTH", "", "", "", ""),
-        ("MS OFFICE", "", "", "", ""),
-        ("CHASSIS SWITCH", "", "", "", ""),
-        ("TPM 2.0", "", "", "", ""),
-        ("CAMERA", "", "", "", ""),
-        ("ANTIVIRUS", "", "", "", ""),
-        ("DP PORT", "", "", "", ""),
-        ("SERIAL COM PORT+PARALLEL", "", "", "", ""),
-        ("Keyboard & Mouse,", "", "", "", ""),
-        ("", "", "COST", "", ""),
-        ("WARRANTY", "3 YEARS", "", "", ""),
-        ("FREIGHT/ DELEVERY EXPENSES", "", "", "", ""),
-        ("INSTALLATION Charge", "", "", "", ""),
-        ("SERCURITY", "", "", "", ""),
-        ("SERVICE Charge", "", "", "", ""),
-        ("NON RETURN OF HDD", "", "", "", ""),
-        ("BG PERCENTAGE AND EXPENSES", "", "", "", ""),
-        ("ORC", "", "", "", ""),
-        ("DISTRI MARGIN", "", "", "", ""),
-        ("LATE DELVERY 1%", "", "", "", ""),
-        ("GeM charges (0.5%)", "", "", "", ""),
-        ("INSPECTION", "", "", "Total", ""),
-        ("", "", "", "Company Margin", ""),
-        ("", "", "", "Sub Total", ""),
-        ("", "", "", "GST 18%", ""),
-        ("", "", "", "Grant Total", ""),
+        "processor CPU", "MB", "graphics CARD", "OS", "RAM", "SSD", "SSD(SECONDARY)",
+        "cabinet LTR", "smps WATT", "ADAPTER", "DVD WRITER", "MONITOR", "SPEAKER",
+        "WIRELESS + BLUETOOTH", "MS OFFICE", "CHASSIS SWITCH", "TPM 2.0", "CAMERA",
+        "ANTIVIRUS", "DP PORT", "SERIAL COM PORT+PARALLEL", "Keyboard & Mouse,"
     ]
 
-    # Override first 3 rows with actual bid meta
-    paper_params[0] = ("DEPARTMENT NAME", bid_meta.get('org','DEPT OF FINANCIAL SERVICES'), bid_meta.get('item','entry and mid level DESKTOP COMPUTERS'), "", str(bid_meta.get('qty',65)))
-    paper_params[1] = ("GEM BID NO.", bid_meta.get('bid_no','GEM/2026/B/7936262'), "", bid_meta.get('dept','DHANBAD'), "")
-    paper_params[2] = ("Bid Closing Date/Time", bid_meta.get('closing','29-8-2026 16:00'), "12:00 AM", "", "")
+    atc_lower = safe_lower(atc_text) if atc_text else ""
 
-    # Write header
-    for r_idx, row_data in enumerate(paper_params, start=1):
-        for c_idx, val in enumerate(row_data, start=1):
-            cell = ws.cell(row=r_idx, column=c_idx, value=val)
-            cell.border = thin_border
-            cell.font = normal
-            cell.alignment = Alignment(vertical='center', horizontal='left' if c_idx<=2 else 'center')
-            if c_idx==1 and val!="": cell.font = bold
-            if r_idx<=4:
-                cell.fill = header_fill
-                cell.font = bold
-                if r_idx==4:
-                    if c_idx==2: cell.fill = atc_fill
-                    if c_idx==3: cell.fill = compat_fill
-
-    # Now fill compatible products for each parameter row (5 to 26)
-    total_base = 0
-    for r_idx in range(5, 27):
-        param_name = safe_str(ws.cell(row=r_idx, column=1).value).strip()
-        if not param_name: continue
-
-        # Find in master
+    row_num = 4
+    for param_name in paper_params:
         param_lower = safe_lower(param_name)
-        search_key = param_lower.split()[0] # first word
+        search_key = param_lower.split()[0]
 
-        # Find compatible rows in master
-        mask = df_master[prod_col].apply(lambda x: search_key in safe_lower(x) or param_lower in safe_lower(x) or safe_lower(x) in param_lower)
-        df_filtered = df_master[mask] if mask.any() else pd.DataFrame()
-
-        # Also try model column
-        if df_filtered.empty:
-            mask2 = df_master[model_col].apply(lambda x: search_key in safe_lower(x))
-            df_filtered = df_master[mask2] if mask2.any() else pd.DataFrame()
-
-        compatible_model = "Not in Master"
-        atc_spec_val = "0"
-        price_val = 0
-        found_compatible = False
-
-        # Check ATC text for spec line
+        # Find ATC spec line from uploaded ATC
+        atc_spec_val = ""
         if atc_text:
             for line in atc_text.split("\n"):
                 if search_key in safe_lower(line) and 5 < len(line) < 200:
-                    atc_spec_val = line.strip()[:80]
+                    atc_spec_val = line.strip()[:100]
                     break
-
-        # Default specs if ATC not found
-        if atc_spec_val == "0":
-            default_specs = {
+        if not atc_spec_val:
+            defaults = {
                 "processor cpu": "Intel core i5 14400",
-                "mb": "H 610",
+                "mb": "H 610 DDR5",
                 "graphics card": "0",
                 "os": "WINDS 11 PRO",
                 "ram": "16 GB DDR5",
@@ -244,134 +177,62 @@ def create_paper_format_excel(bid_meta, df_master, atc_text, bid_text):
                 "ssd(secondary)": "1 TB SATA SSD",
                 "cabinet ltr": "TOWER",
                 "smps watt": "200 WATT",
-                "monitor": '21.5"',
-                "keyboard & mouse,": "WIRED",
+                "monitor": '21.5" IPS',
                 "tpm 2.0": "YES",
-                "ms office": "NO",
             }
-            atc_spec_val = default_specs.get(param_lower, "0")
+            atc_spec_val = defaults.get(param_lower, param_name)
+
+        # Find compatible from master
+        mask = df_master[prod_col].apply(lambda x: search_key in safe_lower(x) or param_lower in safe_lower(x))
+        df_filtered = df_master[mask] if mask.any() else pd.DataFrame()
+        if df_filtered.empty:
+            mask2 = df_master[model_col].apply(lambda x: search_key in safe_lower(x))
+            df_filtered = df_master[mask2] if mask2.any() else pd.DataFrame()
+
+        compatible_model = "Not Available in Master"
 
         if not df_filtered.empty:
-            # Find first compatible
             for _, row in df_filtered.iterrows():
                 model = safe_str(row[model_col])
                 specs = safe_str(row[specs_col]) if specs_col and specs_col in row else ""
-                price = row[price_col]
-                try: price_num = float(price) if price!="" else 0
-                except: price_num = 0
-
-                # Check compatibility with ATC
                 if is_compatible(atc_spec_val, model, specs):
                     compatible_model = model
-                    price_val = price_num
-                    found_compatible = True
+                    if specs: compatible_model += f" - {specs[:80]}"
                     break
-
-            # If no compatible found, take first
-            if not found_compatible:
+            if compatible_model == "Not Available in Master":
                 row = df_filtered.iloc[0]
                 compatible_model = safe_str(row[model_col])
-                price = row[price_col]
-                try: price_val = float(price) if price!="" else 0
-                except: price_val = 0
-        else:
-            # Use default price from your photo
-            default_prices = {
-                "processor cpu": 14500, "mb": 4250, "graphics card": 0, "os": 600,
-                "ram": 17500, "ssd": 3650, "ssd(secondary)": 11500, "cabinet ltr": 15500,
-                "smps watt": 1850, "monitor": 0, "speaker": 0, "wireless + bluetooth": 4450,
-                "ms office": 0, "tpm 2.0": 700, "keyboard & mouse,": 350
-            }
-            price_val = default_prices.get(param_lower, 0)
-            compatible_model = f"{param_name} - {atc_spec_val}" if atc_spec_val!="0" else "0"
+                specs = safe_str(row[specs_col]) if specs_col and specs_col in row else ""
+                if specs: compatible_model += f" - {specs[:80]}"
 
-        # Fill columns: B=ATC Spec, C=Compatible Product (Master), D=price label, E=Amount
-        ws.cell(row=r_idx, column=2, value=atc_spec_val).border = thin_border
-        ws.cell(row=r_idx, column=2).fill = atc_fill
+        # Write row
+        ws.cell(row=row_num, column=1, value=param_name.upper()).border = thin_border
+        ws.cell(row=row_num, column=1).font = bold
 
-        ws.cell(row=r_idx, column=3, value=compatible_model).border = thin_border
-        ws.cell(row=r_idx, column=3).fill = compat_fill
-        ws.cell(row=r_idx, column=3).font = Font(bold=True, size=10)
+        ws.cell(row=row_num, column=2, value=atc_spec_val).border = thin_border
+        ws.cell(row=row_num, column=2).fill = atc_fill
 
-        ws.cell(row=r_idx, column=5, value=price_val).border = thin_border
-        ws.cell(row=r_idx, column=5).number_format = '#,##0'
+        ws.cell(row=row_num, column=3, value=compatible_model).border = thin_border
+        ws.cell(row=row_num, column=3).fill = compat_fill
+        ws.cell(row=row_num, column=3).font = Font(bold=True, size=11)
 
-        total_base += price_val
+        row_num += 1
 
-    # COST row
-    ws.cell(row=27, column=3, value="COST").font = bold
-    ws.cell(row=27, column=5, value=total_base).font = bold
-    ws.cell(row=27, column=5).border = thin_border
-    ws.cell(row=27, column=5).number_format = '#,##0'
-
-    # Other charges
-    other_charges = [
-        ("WARRANTY", 0), ("FREIGHT/ DELEVERY EXPENSES", 600), ("INSTALLATION Charge", 300),
-        ("SERCURITY", 0), ("SERVICE Charge", 0), ("NON RETURN OF HDD", 250),
-        ("BG PERCENTAGE AND EXPENSES", 0), ("ORC", 0), ("DISTRI MARGIN", 0),
-        ("LATE DELVERY 1%", 300), ("GeM charges (0.5%)", 0), ("INSPECTION", 0),
-    ]
-
-    current_total = total_base
-    for idx, (charge_name, charge_val) in enumerate(other_charges):
-        r = 28 + idx
-        ws.cell(row=r, column=1, value=charge_name).font = bold
-        ws.cell(row=r, column=5, value=charge_val).border = thin_border
-        ws.cell(row=r, column=5).number_format = '#,##0'
-        current_total += charge_val
-        if idx==0:
-            ws.cell(row=r, column=2, value="3 YEARS").border = thin_border
-
-    ws.cell(row=40, column=5, value=current_total).font = bold
-    ws.cell(row=40, column=5).border = thin_border
-
-    company_margin = 4000
-    ws.cell(row=41, column=4, value="Company Margin").font = bold
-    ws.cell(row=41, column=5, value=company_margin).border = thin_border
-    ws.cell(row=41, column=5).number_format = '#,##0'
-    ws.cell(row=41, column=6, value="CLASS 1").border = thin_border
-    ws.cell(row=41, column=7, value="50%").border = thin_border
-
-    sub_total = current_total + company_margin
-    ws.cell(row=42, column=4, value="Sub Total").font = bold
-    ws.cell(row=42, column=5, value=sub_total).font = bold
-    ws.cell(row=42, column=5).border = thin_border
-    ws.cell(row=42, column=6, value="RA RULE").border = thin_border
-    ws.cell(row=42, column=7, value="50%").border = thin_border
-
-    gst = round(sub_total * 0.18)
-    ws.cell(row=43, column=4, value="GST 18%").font = bold
-    ws.cell(row=43, column=5, value=gst).border = thin_border
-    ws.cell(row=43, column=6, value="RA").border = thin_border
-    ws.cell(row=43, column=7, value="NO").border = thin_border
-
-    grant_total = sub_total + gst
-    ws.cell(row=44, column=4, value="Grant Total").font = Font(bold=True, size=12)
-    ws.cell(row=44, column=5, value=grant_total).font = Font(bold=True, size=12)
-    ws.cell(row=44, column=5).border = thin_border
-    ws.cell(row=44, column=6, value="BID PRICE").font = bold
-    ws.cell(row=44, column=6).border = thin_border
-
+    # Set widths
     ws.column_dimensions['A'].width = 28
-    ws.column_dimensions['B'].width = 28
-    ws.column_dimensions['C'].width = 32
-    ws.column_dimensions['D'].width = 14
-    ws.column_dimensions['E'].width = 14
-    ws.column_dimensions['F'].width = 14
-    ws.column_dimensions['G'].width = 10
+    ws.column_dimensions['B'].width = 38
+    ws.column_dimensions['C'].width = 45
 
-    # Sheet 2: Detailed compatible list
-    ws2 = wb.create_sheet("ATC+BID vs Master - Detailed")
-    ws2.append(["PARAMETER (ATC/BID)", "ATC Spec", "Compatible Product (Master)", "Model Specs", "Price (₹)", "Status"])
-    for r_idx in range(5, 27):
-        param = safe_str(ws.cell(row=r_idx, column=1).value)
-        atc_spec = safe_str(ws.cell(row=r_idx, column=2).value)
-        compat = safe_str(ws.cell(row=r_idx, column=3).value)
-        price = ws.cell(row=r_idx, column=5).value
-        status = "✅ Compatible" if compat!="Not in Master" and compat!="0" else "❌ Missing"
-        ws2.append([param, atc_spec, compat, "", price, status])
+    # Second sheet - same but simple list
+    ws2 = wb.create_sheet("Simple List - Compatible Only")
+    ws2.append(["PARAMETER", "Compatible Product from Master (ATC Matched)"])
+    for r in range(4, row_num):
+        param = ws.cell(row=r, column=1).value
+        compat = ws.cell(row=r, column=3).value
+        ws2.append([param, compat])
 
-    for col in ['A','B','C','D','E','F']: ws2.column_dimensions[col].width = 22
+    ws2.column_dimensions['A'].width = 30
+    ws2.column_dimensions['B'].width = 50
 
     buffer = io.BytesIO()
     wb.save(buffer)
@@ -379,7 +240,7 @@ def create_paper_format_excel(bid_meta, df_master, atc_text, bid_text):
     return buffer
 
 # UI
-st.markdown('<div class="hero"><div style="font-size:20px; font-weight:800;">🇮🇳 GeM — Paper Format + Compatible Column</div><div style="font-size:11px; opacity:0.7;">Now shows ATC Spec + Compatible Master Product + Price like your paper</div></div><div class="tricolor"></div>', unsafe_allow_html=True)
+st.markdown('<div class="hero"><div style="font-size:20px; font-weight:800;">🇮🇳 GeM — Compatible Product Only (No Price)</div><div style="font-size:11px; opacity:0.7;">Shows only ATC + Compatible Master Product</div></div><div class="tricolor"></div>', unsafe_allow_html=True)
 
 if st.button("🗑️ Clear All", type="primary"):
     for k in list(st.session_state.keys()): del st.session_state[k]
@@ -394,13 +255,13 @@ with c1:
     atc_text=""; atc_type=""
     if atc_file:
         atc_text, atc_type, _ = read_atc_any(atc_file)
-        if atc_text: st.success(f"✅ ATC read {len(atc_text)} chars")
+        if atc_text: st.success(f"✅ ATC read")
     st.markdown('</div>', unsafe_allow_html=True)
 with c2:
     st.markdown('<div class="upload-card">', unsafe_allow_html=True)
     st.markdown('**📑 Bid PDF**')
     bid_file = st.file_uploader("Bid", type=["pdf"], key="bid", label_visibility="collapsed")
-    bid_meta={"bid_no":"GEM/2026/B/7936262","org":"DEPT OF FINANCIAL SERVICES","dept":"DHANBAD","item":"entry and mid level DESKTOP COMPUTERS","qty":65,"closing":"29-8-2026 16:00"}
+    bid_meta={"bid_no":"GEM/2026/B/7936262","org":"DEPT OF FINANCIAL SERVICES","qty":65}
     bid_text=""
     if bid_file:
         bid_text = read_pdf_text(bid_file)
@@ -417,7 +278,6 @@ with c3:
             df_master = pd.read_excel(master_file) if not master_file.name.endswith('.csv') else pd.read_csv(master_file)
             df_master = df_master.fillna("")
             st.success(f"✅ {len(df_master)} models")
-            st.dataframe(df_master.head(3), use_container_width=True)
         except Exception as e:
             st.error(f"{e}")
     st.markdown('</div>', unsafe_allow_html=True)
@@ -426,26 +286,23 @@ st.markdown('</div>', unsafe_allow_html=True)
 if atc_file and bid_file and master_file and df_master is not None:
 
     st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    st.markdown("### 📊 Excel with Compatible Product Column")
+    st.markdown("### 📊 Excel — Only Compatible Product (No Price)")
 
-    excel_buffer = create_paper_format_excel(bid_meta, df_master, atc_text, bid_text)
+    excel_buffer = create_excel_compatible_only(bid_meta, df_master, atc_text)
 
-    st.success("✅ Excel Generated — Now includes Compatible Product from Master!")
+    st.success("✅ Excel Generated — No Price, Only Compatible Products!")
 
     st.markdown("""
-    **New Excel Columns:**
-    - **Column A:** PARAMETER (processor CPU, MB, etc.)
-    - **Column B:** ATC Spec (fetched from ATC/BID PDF/Image) — Blue
-    - **Column C:** **Compatible Product (from Master Sheet)** — Green — This is NEW
-    - **Column D:** price / DDR5 / IPS labels
-    - **Column E:** Amount ₹ (price from Master)
-    - **Column F-G:** CLASS 1, RA RULE etc.
+    **Excel Columns (No Price):**
+    - **Column A:** PARAMETER (processor CPU, MB, RAM...)
+    - **Column B:** ATC Spec (from your ATC/Bid upload) — Blue
+    - **Column C:** Compatible Product (from Master Sheet) — Green — **Only this**
     """)
 
     st.download_button(
-        label="📥 Download PAPER FORMAT EXCEL with Compatible Product Column",
+        label="📥 Download EXCEL — Compatible Product Only (No Price)",
         data=excel_buffer,
-        file_name=f"GeM_Paper_Compatible_{safe_str(bid_meta.get('bid_no','')).replace('/','_')}_{datetime.now().strftime('%d%m%Y')}.xlsx",
+        file_name=f"GeM_Compatible_Only_{safe_str(bid_meta.get('bid_no','')).replace('/','_')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
         type="primary"

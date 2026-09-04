@@ -4,36 +4,16 @@ import re
 from pypdf import PdfReader
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
-import streamlit.components.v1 as components
-import io, os
+import io, os, shutil
 
 st.set_page_config(page_title="GeM 3-Row Exact - Built-in Master", layout="wide", page_icon="🤖")
-
-# FIXED PATH - checks all possible locations
-POSSIBLE_PATHS = [
-    "Intel_Motherboard_All_Vendors_Technical_Compliance_v2.xlsx",
-    "/mnt/data/Intel_Motherboard_All_Vendors_Technical_Compliance_v2.xlsx",
-    "./Intel_Motherboard_All_Vendors_Technical_Compliance_v2.xlsx"
-]
-MASTER_FILE_PATH = None
-for p in POSSIBLE_PATHS:
-    if os.path.exists(p):
-        MASTER_FILE_PATH = p
-        break
-if not MASTER_FILE_PATH:
-    MASTER_FILE_PATH = POSSIBLE_PATHS[0]
 
 st.markdown("""
 <style>
 .stApp { background: radial-gradient(ellipse at top, #0F172A 0%, #020617 100%); color: #E2E8F0; }
 .hero { background: linear-gradient(135deg, #020617, #1E293B); border-radius: 20px; padding: 18px 24px; border: 1px solid #334155; }
 .glass-card { background: rgba(15,23,42,0.9); border-radius: 18px; padding: 20px; border: 1px solid rgba(56,189,248,0.15); margin-bottom: 14px; }
-.robot-track { position: relative; height: 90px; background: #020617; border-radius: 14px; overflow: hidden; border: 1px solid rgba(56,189,248,0.2); margin: 10px 0; }
-.robot { position: absolute; font-size: 58px; top: 6px; left: -70px; animation: patrol 6s linear infinite; }
-@keyframes patrol { 0%{left:-70px} 50%{left:calc(100% - 60px)} 100%{left:-70px} }
-.corner-robot { position: fixed; bottom: 14px; right: 14px; width: 66px; height: 66px; background: #0F172A; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 36px; z-index: 9999; border: 1px solid #38BDF8; }
 </style>
-<div class="corner-robot">🤖</div>
 """, unsafe_allow_html=True)
 
 def safe_str(x):
@@ -73,16 +53,19 @@ def extract_components(text):
                 break
     return comps
 
-@st.cache_data
-def read_master_all_sheets():
+def load_models_from_excel(file_path_or_buffer):
     all_models = []
     try:
-        xls = pd.ExcelFile(MASTER_FILE_PATH)
+        xls = pd.ExcelFile(file_path_or_buffer)
         for sheet in xls.sheet_names:
             try:
                 for header_row in [3, 0]:
                     try:
-                        df = pd.read_excel(MASTER_FILE_PATH, sheet_name=sheet, header=header_row)
+                        if isinstance(file_path_or_buffer, str):
+                            df = pd.read_excel(file_path_or_buffer, sheet_name=sheet, header=header_row)
+                        else:
+                            file_path_or_buffer.seek(0)
+                            df = pd.read_excel(file_path_or_buffer, sheet_name=sheet, header=header_row)
                         df = df.fillna("")
                         model_col = None
                         for c in df.columns:
@@ -101,8 +84,53 @@ def read_master_all_sheets():
             except:
                 pass
     except Exception as e:
-        return []
+        pass
     return all_models
+
+# TRY TO FIND BUILT-IN MASTER IN 5 PLACES
+MASTER_PATHS = [
+    "/mnt/data/Intel_Motherboard_All_Vendors_Technical_Compliance_v2.xlsx",
+    "Intel_Motherboard_All_Vendors_Technical_Compliance_v2.xlsx",
+    "./Intel_Motherboard_All_Vendors_Technical_Compliance_v2.xlsx",
+    "/tmp/Intel_Motherboard_All_Vendors_Technical_Compliance_v2.xlsx",
+    "Intel_Motherboard_All_Vendors_Technical_Compliance_v2 (1).xlsx"
+]
+
+built_in_master_path = None
+for p in MASTER_PATHS:
+    if os.path.exists(p):
+        built_in_master_path = p
+        break
+
+# If found in /mnt/data but not in current folder, copy it to current folder for Streamlit
+if built_in_master_path and not os.path.exists("Intel_Motherboard_All_Vendors_Technical_Compliance_v2.xlsx"):
+    try:
+        shutil.copy(built_in_master_path, "Intel_Motherboard_All_Vendors_Technical_Compliance_v2.xlsx")
+        built_in_master_path = "Intel_Motherboard_All_Vendors_Technical_Compliance_v2.xlsx"
+    except:
+        pass
+
+st.markdown('<div class="hero"><h1>🤖 GeM 3-Row Exact — Built-in Master 337 Models</h1><p>Row1: ATC Exact | Row2: BID Exact | Row3: 2 Compatible Models from Master</p></div>', unsafe_allow_html=True)
+
+all_models = []
+if built_in_master_path:
+    all_models = load_models_from_excel(built_in_master_path)
+    st.success(f"✅ Built-in Master Loaded: {len(all_models)} Models from {built_in_master_path}")
+else:
+    st.warning("⚠️ Built-in Master not found in server. Please upload your Master file once — after that it will be built-in.")
+    fallback_master = st.file_uploader("📊 Upload Master Excel (ONE TIME — will become built-in)", type=["xlsx","xls"], key="fallback")
+    if fallback_master:
+        # Save it so next time it's built-in
+        with open("Intel_Motherboard_All_Vendors_Technical_Compliance_v2.xlsx", "wb") as f:
+            f.write(fallback_master.getbuffer())
+        all_models = load_models_from_excel("Intel_Motherboard_All_Vendors_Technical_Compliance_v2.xlsx")
+        st.success(f"✅ Master Saved & Loaded: {len(all_models)} Models — Now it is built-in, no need to upload again!")
+    else:
+        st.stop()
+
+c1,c2 = st.columns(2)
+with c1: atc_file = st.file_uploader("📄 ATC File", type=["pdf"])
+with c2: bid_file = st.file_uploader("📑 BID File", type=["pdf"])
 
 def find_two_compatible(req_text, all_models):
     req = safe_lower(req_text)
@@ -133,20 +161,6 @@ def find_two_compatible(req_text, all_models):
                 if len(found)>=2: break
     return found[:2]
 
-st.markdown('<div class="hero"><h1>🤖 GeM 3-Row Exact — Built-in Master</h1><p>Upload only ATC + BID → Row1: ATC Exact | Row2: BID Exact | Row3: 2 Compatible Models</p></div>', unsafe_allow_html=True)
-
-all_models = read_master_all_sheets()
-if all_models:
-    st.markdown(f'<div class="glass-card">✅ Built-in Master Loaded: <b>{len(all_models)} Models</b> — Path: {MASTER_FILE_PATH}</div>', unsafe_allow_html=True)
-else:
-    st.error(f"Master not found at {MASTER_FILE_PATH}. Please upload your Master file to /mnt/data/ or same folder as app.py")
-    st.info("For Streamlit Cloud: Put Intel_Motherboard_All_Vendors_Technical_Compliance_v2.xlsx in same GitHub repo as app.py")
-    st.stop()
-
-c1,c2 = st.columns(2)
-with c1: atc_file = st.file_uploader("📄 ATC File", type=["pdf"])
-with c2: bid_file = st.file_uploader("📑 BID File", type=["pdf"])
-
 if atc_file and bid_file:
     atc_text = read_pdf(atc_file)
     bid_text = read_pdf(bid_file)
@@ -175,7 +189,7 @@ if atc_file and bid_file:
     h_font = Font(bold=True, color="FFFFFF", size=11)
     h_fill = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
     ws.merge_cells('A1:F1')
-    ws['A1']=f"GeM 3-ROW EXACT — {len(all_models)} Models"
+    ws['A1']=f"GeM 3-ROW EXACT — {len(all_models)} Models Built-in"
     ws['A1'].font=Font(bold=True, size=12, color="38BDF8")
     ws['A1'].fill=PatternFill(start_color="020617", end_color="020617", fill_type="solid")
     ws['A1'].alignment=Alignment(horizontal='center', vertical='center')
